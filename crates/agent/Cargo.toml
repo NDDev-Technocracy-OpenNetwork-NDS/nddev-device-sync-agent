@@ -1,6 +1,6 @@
 [package]
 name = "nddev-device-sync-agent"
-version.workspace = true
+version = "0.0.1-alpha.5"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -11,18 +11,20 @@ repository.workspace = true
 nddev-device-sync-adapter-io = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-OpenNetwork/nddev-device-sync-agent", rev = "341644980976a08825b194f147b7534321325785" }
 nddev-device-sync-telemetry = { version = "=0.0.1-alpha.9", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-observability", rev = "bb019a4b78f9a921c72e445c7e1ff5c0fe9c24ea" }
 serde_json = "1"
+sha2 = "0.10"
 tracing = "0.1"
 
 [dependencies]
-nddev-device-sync-domain = { version = "=0.0.9", git = "https://github.com/NDDev-OpenNetwork/nddev-device-sync-core.git", rev = "61daab3363fb74b54b2d55e34fad968fb8594421" }
+nddev-device-sync-domain = { version = "=0.0.10", git = "https://github.com/NDDev-OpenNetwork/nddev-device-sync-core.git", rev = "631edf30924418e29f2bb0859ab02cbab235623e" }
 nddev-device-sync-sysinfo = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-OpenNetwork/nddev-device-sync-sysinfo", rev = "7a18e05f8a1351988af6903c588b0b3ec776c2b0" }
 nddev-device-sync-clipboard = { version = "=0.0.1-alpha.4", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-clipboard", rev = "d435645e3fdaef1989980c3dbecf9968b94f952c" }
 nddev-device-sync-cleaner = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-OpenNetwork/nddev-device-sync-cleaner", rev = "1c1a14dddca3d06456b5abef30570cdb3650aac8" }
 nddev-device-sync-updater = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-OpenNetwork/nddev-device-sync-updater", rev = "f228b0da9fa737454bd4334f442194f615d56586" }
-nddev-device-sync-gds = { version = "=0.0.1-alpha.2", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds", rev = "e3c0d2ae36da7026e07f08a13ec38aacac2869f8" }
+nddev-device-sync-gds = { version = "=0.0.1-alpha.3", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds", rev = "7043e47e6a4452bc9096a7e25eea83b53c6b2b58" }
 nddev-device-sync-rds = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-OpenNetwork/nddev-device-sync-rds", rev = "9f12f64578722f808935ee1ded1c0246a248945d" }
 
 [dev-dependencies]
+tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 nddev-device-sync-telemetry = { version = "=0.0.1-alpha.9", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-observability", rev = "bb019a4b78f9a921c72e445c7e1ff5c0fe9c24ea", features = ["client-traces"] }
 prost = "0.14"

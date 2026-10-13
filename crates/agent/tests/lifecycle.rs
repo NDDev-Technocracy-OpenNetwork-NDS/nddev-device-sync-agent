@@ -199,17 +199,18 @@ async fn native_timeout_uses_core_failure_observation_and_error_span() {
 }
 
 #[tokio::test]
-#[ignore = "requires scripts/check-agent.py with the pinned real GDS provider and owned Git repository"]
+#[ignore = "requires scripts/check-agent.py with the verified bundled Rust worker and owned Git repository"]
 async fn native_gds_query_uses_core_observation_and_projection() {
     let repository = std::path::PathBuf::from(std::env::var("NDS_AGENT_TEST_REPOSITORY").unwrap());
     assert!(repository.is_absolute());
     let agent = NativeAgent::discover().unwrap();
     let (traces, feed, dispatch) = telemetry();
-    agent
+    let status = agent
         .repository_status(&repository)
         .with_subscriber(dispatch)
         .await
         .unwrap();
+    assert_eq!(status.status.unwrap().remote_freshness, "unknown");
     let state = agent
         .modules()
         .into_iter()
@@ -234,9 +235,9 @@ async fn native_gds_query_uses_core_observation_and_projection() {
     traces.shutdown();
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 #[tokio::test]
-async fn windows_gds_is_unconfigured_and_refuses_queries() {
+async fn unqualified_gds_platform_is_unconfigured_and_refuses_queries() {
     let agent = NativeAgent::discover().unwrap();
     let state = agent
         .modules()

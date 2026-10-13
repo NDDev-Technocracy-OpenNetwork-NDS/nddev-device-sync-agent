@@ -1,0 +1,151 @@
+//! Build-time packaging, separate from the runtime Agent. The locked dependency
+//! graph chooses the worker source; callers choose only a staging bundle.
+use nddev_device_sync_agent::GDS_WORKER_MAX_BYTES;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use std::{
+    fs,
+    io::{Read, Write},
+    path::PathBuf,
+    process::{Command, Stdio},
+};
+
+fn main() {
+    if let Err(error) = package() {
+        eprintln!("gds_worker_packaging_failed: {error}");
+        std::process::exit(1);
+    }
+}
+
+fn package() -> Result<(), Box<dyn std::error::Error>> {
+    let mut args = std::env::args_os().skip(1);
+    if args.next().is_none_or(|arg| arg != "--bundle") {
+        return Err("expected --bundle <absolute staging directory>".into());
+    }
+    let bundle = PathBuf::from(args.next().ok_or("missing staging directory")?);
+    if !bundle.is_absolute() || args.next().is_some() {
+        return Err("one absolute staging directory is required".into());
+    }
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        return Err("worker runtime packaging currently requires qualified Linux x86_64".into());
+    }
+    let target = "x86_64-unknown-linux-gnu";
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let metadata = Command::new("cargo")
+        .args(["metadata", "--locked", "--format-version", "1"])
+        .current_dir(&root)
+        .stdin(Stdio::null())
+        .output()?;
+    if !metadata.status.success() {
+        return Err("locked dependency metadata failed".into());
+    }
+    let metadata: Value = serde_json::from_slice(&metadata.stdout)?;
+    let packages = metadata["packages"]
+        .as_array()
+        .ok_or("invalid dependency metadata")?;
+    let found = packages
+        .iter()
+        .filter(|item| item["name"] == "nddev-device-sync-gds")
+        .collect::<Vec<_>>();
+    if found.len() != 1 {
+        return Err("one canonical GDS package is required".into());
+    }
+    let gds = found[0];
+    let source = gds["source"]
+        .as_str()
+        .ok_or("GDS requires an immutable Git source")?;
+    let revision = source
+        .rsplit_once('#')
+        .ok_or("GDS requires an immutable Git revision")?
+        .1;
+    if !source.starts_with(
+        "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds?",
+    ) || revision.len() != 40
+        || !revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || !source.contains(&format!("rev={revision}#"))
+    {
+        return Err("GDS source is not the canonical immutable pin".into());
+    }
+    let manifest = PathBuf::from(
+        gds["manifest_path"]
+            .as_str()
+            .ok_or("missing GDS manifest")?,
+    );
+    if !gds["targets"]
+        .as_array()
+        .ok_or("missing GDS targets")?
+        .iter()
+        .any(|target| target["name"] == "nds-gds-readonly-worker")
+    {
+        return Err("the pinned GDS package contains no Rust worker".into());
+    }
+    fs::create_dir_all(&bundle)?;
+    let bundle = bundle.canonicalize()?;
+    // Distinct target directory avoids taking the host build's Cargo lock.
+    let build = bundle.join(".gds-worker-build");
+    let status = Command::new("cargo")
+        .args([
+            "build",
+            "--locked",
+            "--release",
+            "--bin",
+            "nds-gds-readonly-worker",
+            "--target",
+            target,
+            "--manifest-path",
+        ])
+        .arg(&manifest)
+        .arg("--target-dir")
+        .arg(&build)
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+    if !status.success() {
+        return Err("locked GDS worker build failed".into());
+    }
+    let worker = build.join(target).join("release/nds-gds-readonly-worker");
+    let size = fs::metadata(&worker)?.len();
+    if size == 0 || size > GDS_WORKER_MAX_BYTES {
+        return Err("worker size is outside the artifact bound".into());
+    }
+    let staged = bundle.join(".nds-gds-readonly-worker.tmp");
+    let mut source_file = fs::File::open(&worker)?;
+    let mut staged_file = fs::File::create(&staged)?;
+    let mut hash = Sha256::new();
+    let mut chunk = [0; 16 * 1024];
+    let mut count = 0u64;
+    loop {
+        let bytes = source_file.read(&mut chunk)?;
+        if bytes == 0 {
+            break;
+        }
+        count = count
+            .checked_add(bytes as u64)
+            .ok_or("worker size overflow")?;
+        if count > GDS_WORKER_MAX_BYTES {
+            return Err("worker exceeded the artifact bound".into());
+        }
+        hash.update(&chunk[..bytes]);
+        staged_file.write_all(&chunk[..bytes])?;
+    }
+    if count != size {
+        return Err("worker changed during packaging".into());
+    }
+    staged_file.sync_all()?;
+    drop(staged_file);
+    let digest = format!("{:x}", hash.finalize());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))?;
+    }
+    fs::rename(staged, bundle.join("nds-gds-readonly-worker"))?;
+    let receipt = json!({"schema_version":1,"worker":"nds-gds-readonly-worker","target":target,"source":source,"version":gds["version"],"sha256":digest,"host_build_environment":{"NDS_GDS_WORKER_SHA256":digest}});
+    fs::write(
+        bundle.join("nds-gds-worker.build.json"),
+        serde_json::to_vec_pretty(&receipt)?,
+    )?;
+    println!("{receipt}");
+    Ok(())
+}

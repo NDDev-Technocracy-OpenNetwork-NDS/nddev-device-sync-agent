@@ -1,4 +1,5 @@
 use crate::view::{AgentError, ModuleState, Reachability};
+use crate::worker::bundled_git_worker;
 use nddev_device_sync_adapter_io::{CancellationToken, IoError, NativeIo};
 use nddev_device_sync_clipboard::{Clipboard, ReadClipboard};
 use nddev_device_sync_domain::{
@@ -86,10 +87,15 @@ impl NativeAgent {
             None
         };
         let gds = if supported("gds") {
-            executable("gds")
-                .map(|path| Gds::new(io.process_handle(), path))
-                .transpose()
-                .map_err(io_error)?
+            bundled_git_worker()?
+                .map(|path| {
+                    Gds::new(
+                        io.process_handle(),
+                        path,
+                        std::time::Duration::from_secs(12),
+                    )
+                })
+                .transpose()?
         } else {
             None
         };
@@ -303,12 +309,14 @@ impl NativeAgent {
         path: &Path,
     ) -> Result<nddev_device_sync_gds::Status, AgentError> {
         self.observe("gds", async {
+            // Recheck the artifact immediately before this operation. Runtime
+            // PATH/env values cannot replace its fixed path or embedded digest.
+            bundled_git_worker()?.ok_or(AgentError::Unavailable)?;
             self.gds
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
                 .status(path, self.cancellation.clone())
                 .await
-                .map_err(io_error)
         })
         .await
     }

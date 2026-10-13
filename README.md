@@ -39,6 +39,21 @@ signed events and actual native spans, reporting transport acknowledgements,
 operator policy and undelivered/dropped records separately. Vault list cursors
 come from the native paginated read model, including tombstones/conflicts.
 
+Linux GDS uses the bundled Rust worker and the same frozen IO source as the
+native module graph. Build packaging with `cargo run --locked -p
+nddev-device-sync-agent --bin nds-package-gds-worker -- --bundle <staging-dir>`.
+The receipt binds the locked GDS source to the actual worker digest. Set its
+`NDS_GDS_WORKER_SHA256` for the host build and place the worker beside the host
+executable. The agent verifies that fixed sibling with bounded streaming reads
+before each query; runtime environment, PATH and presentation input cannot
+select its executable or expected hash. Verification assumes the existing
+trusted installation boundary; hashing followed by execution through a path
+does not provide race-free attestation. macOS/Windows GDS remains unsupported.
+
+The Agent library has its own version; the CLI/input transport remains in its
+separate binary graph. Building without a packaged worker digest leaves GDS
+unconfigured instead of starting an external status provider.
+
 Provider acceptance never extracts a working CLI account token into fixtures.
 The default real GitHub check uses a generated invalid value and verifies denial
 without secret/output leakage. A successful provider check requires an explicitly

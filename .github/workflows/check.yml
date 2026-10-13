@@ -46,7 +46,7 @@ jobs:
           import json, subprocess, sys
           from pathlib import Path
           packages = json.loads(Path(sys.argv[1]).read_text())["packages"]
-          for name in ["sysinfo", "gds"]:
+          for name in ["sysinfo"]:
               provider = next(p for p in packages if p["name"] == "nddev-device-sync-" + name)
               lock = Path(provider["manifest_path"]).parent / "provider.lock.json"
               destination = Path(sys.argv[2]) / name
