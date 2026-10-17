@@ -25,3 +25,9 @@ allow-git = [
     "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-sysinfo",
     "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-updater",
 ]
+
+# Native libsecret build-time target detection; reviewed permissive exception.
+[[licenses.exceptions]]
+name = "target-lexicon"
+version = "=0.13.5"
+allow = ["Apache-2.0 WITH LLVM-exception"]
