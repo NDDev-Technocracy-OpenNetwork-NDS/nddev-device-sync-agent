@@ -93,6 +93,37 @@ async fn cached_missing_provider_is_not_a_fresh_native_observation() {
 }
 
 #[tokio::test]
+#[ignore = "requires scripts/check-agent.py with its paused native provider"]
+async fn invalidating_a_module_cancels_its_actual_query_without_refreshing_health() {
+    use std::time::Duration;
+    assert_eq!(std::env::var("NDS_PAUSED_PROVIDER").as_deref(), Ok("1"));
+    let agent = NativeAgent::discover().unwrap();
+    let (traces, feed, dispatch) = telemetry();
+    let query = agent.system_info().with_subscriber(dispatch);
+    tokio::pin!(query);
+    tokio::select! {
+        _ = &mut query => panic!("paused provider completed before module invalidation"),
+        _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+    }
+    agent.invalidate_module("sysinfo").unwrap();
+    assert!(matches!(
+        tokio::time::timeout(Duration::from_secs(7), query)
+            .await
+            .unwrap(),
+        Err(AgentError::Cancelled)
+    ));
+    assert!(
+        agent
+            .modules()
+            .iter()
+            .all(|module| module.observed_at_ms.is_none()
+                && module.reachability == Reachability::NotChecked)
+    );
+    assert_query_span(&feed, "sysinfo", 0);
+    traces.shutdown();
+}
+
+#[tokio::test]
 #[ignore = "requires scripts/check-agent.py with the real isolated sysinfo provider"]
 async fn native_query_updates_only_its_own_observation() {
     assert_eq!(std::env::var("NDS_ISOLATED_PROVIDER").as_deref(), Ok("1"));
