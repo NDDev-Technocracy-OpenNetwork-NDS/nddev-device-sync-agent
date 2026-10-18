@@ -1,19 +1,18 @@
 //! Real native vault and official GitHub rejection; no provider-success stub.
 //! A positive check requires an explicitly supplied isolated test credential.
 #![cfg(target_os = "linux")]
-use nddev_device_sync_accounts::IdentityClient;
+use nddev_device_sync_accounts::{IdentityClient, SyncRequest};
 use nddev_device_sync_adapter_io::ProcessRequest;
 use nddev_device_sync_vault::VaultClient;
 use serde_json::Value;
 use std::{sync::Arc, time::Duration};
+use tokio::io::AsyncReadExt;
 use zeroize::Zeroizing;
 #[tokio::test]
-#[ignore = "requires an owned fixture and official GitHub CLI; optional isolated test credential"]
+#[ignore = "requires an owned --fixture-sync3 fixture and official GitHub CLI; optional isolated test credential"]
 async fn actual_native_vault_reference_drives_official_github_cli() {
-    let data: Value = serde_json::from_slice(
-        &std::fs::read(std::env::var("NDS_FIXTURE_RECEIPT").unwrap()).unwrap(),
-    )
-    .unwrap();
+    let receipt = std::env::var("NDS_FIXTURE_RECEIPT").unwrap();
+    let data: Value = serde_json::from_slice(&std::fs::read(&receipt).unwrap()).unwrap();
     let endpoint = data["base_url"].as_str().unwrap();
     assert!(endpoint.starts_with("http://localhost:") || endpoint.starts_with("http://127.0.0.1:"));
     let identity = Arc::new(IdentityClient::new(endpoint).unwrap());
@@ -85,11 +84,44 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
         .prepare_device("Owned native agent acceptance".into())
         .await
         .unwrap();
+    // Create the empty server counter without negotiating a local writer.
+    // The fixture operator must finish admission before this test stages data.
+    assert_eq!(
+        identity
+            .sync_request(SyncRequest::CapabilitiesV3)
+            .await
+            .unwrap()
+            .status,
+        200
+    );
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Ok(bytes) = std::fs::read(&receipt)
+                && let Ok(state) = serde_json::from_slice::<Value>(&bytes)
+                && state["new_operation_version"] == 3
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("owned fixture did not finish empty-owner admission");
+    let capabilities = identity
+        .sync_request(SyncRequest::CapabilitiesV3)
+        .await
+        .unwrap();
+    assert_eq!(capabilities.status, 200);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&capabilities.body).unwrap()["new_operation_version"],
+        3
+    );
     let root = tempfile::tempdir().unwrap();
     let vault = VaultClient::new(identity.clone(), root.path().join("nddev-device-sync"))
         .await
         .unwrap();
-    vault.synchronize().await.unwrap();
+    let initial = vault.synchronize().await.unwrap();
+    assert!(!initial.catching_up && initial.sync_error.is_empty() && initial.pending == 0);
     let positive = std::env::var_os("NDS_TEST_ISOLATED_GITHUB_TOKEN_FILE");
     let secret = Zeroizing::new(if let Some(path) = &positive {
         let path = std::path::PathBuf::from(path);
@@ -131,7 +163,8 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
         }
     }
     assert!(persisted > 0);
-    vault.synchronize().await.unwrap();
+    let committed = vault.synchronize().await.unwrap();
+    assert!(!committed.catching_up && committed.sync_error.is_empty() && committed.pending == 0);
     let reference = vault
         .records(String::new())
         .await
@@ -142,17 +175,77 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
         .unwrap()
         .id;
     let mut lists = Vec::new();
-    for _ in 0..2 {
-        let output = tokio::time::timeout(
-            Duration::from_secs(60),
-            tokio::process::Command::new(env!("CARGO_BIN_EXE_nds-agent"))
-                .args(["--server", endpoint, "vault", "list"])
-                .env("XDG_STATE_HOME", root.path())
-                .output(),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+    for index in 0..2 {
+        let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_nds-agent"))
+            .args(["--server", endpoint, "vault", "list"])
+            .env("XDG_STATE_HOME", root.path())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
+        let mut out = tokio::spawn(async move {
+            let mut bytes = Vec::new();
+            stdout
+                .take(1024 * 1024 + 1)
+                .read_to_end(&mut bytes)
+                .await
+                .unwrap();
+            bytes
+        });
+        let mut err = tokio::spawn(async move {
+            let mut bytes = Vec::new();
+            stderr
+                .take(32 * 1024 * 1024 + 1)
+                .read_to_end(&mut bytes)
+                .await
+                .unwrap();
+            bytes
+        });
+        let status = tokio::time::timeout(Duration::from_secs(60), child.wait()).await;
+        if status.is_err() {
+            child.start_kill().unwrap();
+            tokio::time::timeout(Duration::from_secs(5), child.wait())
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        let stdout = tokio::time::timeout(Duration::from_secs(5), &mut out).await;
+        let stderr = tokio::time::timeout(Duration::from_secs(5), &mut err).await;
+        if stdout.is_err() {
+            out.abort();
+        }
+        if stderr.is_err() {
+            err.abort();
+        }
+        let stdout = stdout
+            .expect("CLI stdout remained open after process exit")
+            .unwrap();
+        let logs = stderr
+            .expect("CLI stderr remained open after process exit")
+            .unwrap();
+        assert!(stdout.len() <= 1024 * 1024);
+        assert!(logs.len() <= 32 * 1024 * 1024);
+        assert!(
+            !logs
+                .windows(secret.len())
+                .any(|value| value == secret.as_bytes())
+        );
+        if let Ok(path) = std::env::var("NDS_TEST_CLI_EVIDENCE_FILE") {
+            let path = std::path::PathBuf::from(path).with_extension(format!("list-{index}.jsonl"));
+            assert!(path.is_absolute() && !path.starts_with(env!("CARGO_MANIFEST_DIR")));
+            std::fs::write(path, &logs).unwrap();
+        }
+        let output = std::process::Output {
+            status: status
+                .expect("real CLI exceeded its deadline; owned diagnostics retained")
+                .unwrap(),
+            stdout,
+            stderr: logs,
+        };
         assert!(output.status.success());
         let page: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(page["operation"], "vault.list");
