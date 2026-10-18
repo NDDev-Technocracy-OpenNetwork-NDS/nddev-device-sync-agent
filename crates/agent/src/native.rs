@@ -2,14 +2,12 @@ use crate::view::{AgentError, ModuleState, Reachability};
 use crate::worker::bundled_git_worker;
 use nddev_device_sync_adapter_io::{CancellationToken, IoError, NativeIo};
 use nddev_device_sync_clipboard::{Clipboard, ReadClipboard};
-use nddev_device_sync_domain::{
-    ModuleDescriptor, ModuleGraph, ModuleId, Platform, modules::query_outcome,
-};
+use nddev_device_sync_domain::{ModuleGraph, ModuleId, Platform, modules::query_outcome};
 use nddev_device_sync_sysinfo::{ReadSystemInfo, SystemInfo};
 use std::{
     future::Future,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 use tracing::Instrument;
@@ -19,8 +17,13 @@ use nddev_device_sync_gds::Gds;
 use nddev_device_sync_rds::Rds;
 use nddev_device_sync_updater::Updater;
 
+struct ModuleSlot {
+    state: ModuleState,
+    lifetime: Arc<CancellationToken>,
+}
+
 pub struct NativeAgent {
-    modules: Mutex<Vec<ModuleState>>,
+    modules: Mutex<Vec<ModuleSlot>>,
     graph: ModuleGraph,
     platform: Platform,
     cancellation: CancellationToken,
@@ -34,28 +37,13 @@ pub struct NativeAgent {
 
 impl Drop for NativeAgent {
     fn drop(&mut self) {
-        self.cancellation.cancel();
+        self.close();
     }
 }
 
 impl NativeAgent {
     pub fn discover() -> Result<Self, AgentError> {
-        let mut graph = ModuleGraph::default();
-        for manifest in [
-            nddev_device_sync_sysinfo::MANIFEST,
-            nddev_device_sync_clipboard::MANIFEST,
-            nddev_device_sync_cleaner::MANIFEST,
-            nddev_device_sync_updater::MANIFEST,
-            nddev_device_sync_gds::MANIFEST,
-            nddev_device_sync_rds::MANIFEST,
-        ] {
-            let descriptor: ModuleDescriptor =
-                serde_json::from_str(manifest).map_err(|_| AgentError::InvalidContract)?;
-            graph
-                .register(descriptor)
-                .map_err(|_| AgentError::InvalidContract)?;
-        }
-        graph.validate().map_err(|_| AgentError::InvalidContract)?;
+        let graph = crate::module_graph()?;
         let platform = current_platform();
         let supported = |id: &str| {
             graph
@@ -109,21 +97,24 @@ impl NativeAgent {
         };
         let modules = graph
             .iter()
-            .map(|descriptor| ModuleState {
-                id: descriptor.id.as_str().into(),
-                version: descriptor.version.clone(),
-                configured: match descriptor.id.as_str() {
-                    "sysinfo" => sysinfo.is_some(),
-                    "clipboard" => clipboard.is_some(),
-                    "cleaner" => cleaner.is_some(),
-                    "updater" => updater.is_some(),
-                    "gds" => gds.is_some(),
-                    "rds" => rds.is_some(),
-                    _ => false,
+            .map(|descriptor| ModuleSlot {
+                state: ModuleState {
+                    id: descriptor.id.as_str().into(),
+                    version: descriptor.version.clone(),
+                    configured: match descriptor.id.as_str() {
+                        "sysinfo" => sysinfo.is_some(),
+                        "clipboard" => clipboard.is_some(),
+                        "cleaner" => cleaner.is_some(),
+                        "updater" => updater.is_some(),
+                        "gds" => gds.is_some(),
+                        "rds" => rds.is_some(),
+                        _ => false,
+                    },
+                    reachability: Reachability::NotChecked,
+                    observed_at_ms: None,
+                    error: None,
                 },
-                reachability: Reachability::NotChecked,
-                observed_at_ms: None,
-                error: None,
+                lifetime: Arc::new(CancellationToken::new()),
             })
             .collect();
         Ok(Self {
@@ -144,33 +135,68 @@ impl NativeAgent {
         self.modules
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .clone()
+            .iter()
+            .map(|slot| slot.state.clone())
+            .collect()
+    }
+
+    /// Invalidate only this module's owned requests and stale observations.
+    pub fn invalidate_module(&self, module: &str) -> Result<(), AgentError> {
+        let mut slots = self.modules.lock().unwrap_or_else(|e| e.into_inner());
+        let slot = slots
+            .iter_mut()
+            .find(|slot| slot.state.id == module)
+            .ok_or(AgentError::InvalidInput)?;
+        slot.lifetime.cancel();
+        slot.lifetime = Arc::new(CancellationToken::new());
+        slot.state.reachability = Reachability::NotChecked;
+        slot.state.observed_at_ms = None;
+        slot.state.error = None;
+        Ok(())
     }
 
     /// Terminal shutdown; constructing a new host is an explicit new lifetime.
     pub fn close(&self) {
         self.cancellation.cancel();
+        for slot in self
+            .modules
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+        {
+            slot.lifetime.cancel();
+        }
     }
 
-    async fn observe<T>(
+    async fn observe<T, F: Future<Output = Result<T, AgentError>>>(
         &self,
         module: &'static str,
-        work: impl Future<Output = Result<T, AgentError>>,
+        work: impl FnOnce(CancellationToken) -> F,
     ) -> Result<T, AgentError> {
         async {
             let started = Instant::now();
+            let lifetime = self.modules.lock().unwrap_or_else(|e| e.into_inner()).iter()
+                .find(|slot| slot.state.id == module).map(|slot| slot.lifetime.clone())
+                .ok_or(AgentError::InvalidContract)?;
             let result = if self.cancellation.is_cancelled() {
                 Err(AgentError::Cancelled)
             } else {
                 match self.admitted(module) {
-                    Ok(true) => work.await,
+                    Ok(true) => {
+                        let result = work(lifetime.as_ref().clone()).await;
+                        if self.cancellation.is_cancelled() || lifetime.is_cancelled() {
+                            Err(AgentError::Cancelled)
+                        } else {
+                            result
+                        }
+                    },
                     Ok(false) => Err(AgentError::UnsupportedPlatform),
                     Err(error) => Err(error),
                 }
             };
             let observed_at_ms = SystemTime::now().duration_since(UNIX_EPOCH).ok().and_then(|value| value.as_millis().try_into().ok());
-            if let Some(state) = self.modules.lock().unwrap_or_else(|error| error.into_inner()).iter_mut().find(|state| state.id == module) {
-                state.observe(&result, observed_at_ms);
+            if let Some(slot) = self.modules.lock().unwrap_or_else(|error| error.into_inner()).iter_mut().find(|slot| slot.state.id == module && Arc::ptr_eq(&slot.lifetime, &lifetime)) {
+                slot.state.observe(&result, observed_at_ms);
             }
             nddev_device_sync_telemetry::finish_operation_span(
                 &tracing::Span::current(), query_outcome(&result).terminal_failure(),
@@ -192,11 +218,11 @@ impl NativeAgent {
     pub async fn system_info(
         &self,
     ) -> Result<nddev_device_sync_sysinfo::view::SystemSnapshot, AgentError> {
-        self.observe("sysinfo", async {
+        self.observe("sysinfo", |cancellation| async move {
             self.sysinfo
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
-                .sample(self.cancellation.clone())
+                .sample(cancellation)
                 .await
                 .map_err(|error| match error {
                     nddev_device_sync_sysinfo::Error::Io(error) => io_error(error),
@@ -213,11 +239,11 @@ impl NativeAgent {
         &self,
         before: Option<u64>,
     ) -> Result<nddev_device_sync_clipboard::view::Page, AgentError> {
-        self.observe("clipboard", async {
+        self.observe("clipboard", |cancellation| async move {
             self.clipboard
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
-                .list(before, self.cancellation.clone())
+                .list(before, cancellation)
                 .await
                 .map_err(clipboard_error)
         })
@@ -225,11 +251,11 @@ impl NativeAgent {
     }
 
     pub async fn clipboard_content(&self, entry: u64, mime: String) -> Result<Vec<u8>, AgentError> {
-        self.observe("clipboard", async {
+        self.observe("clipboard", |cancellation| async move {
             self.clipboard
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
-                .fetch(entry, mime, self.cancellation.clone())
+                .fetch(entry, mime, cancellation)
                 .await
                 .map_err(clipboard_error)
         })
@@ -239,11 +265,11 @@ impl NativeAgent {
     pub async fn cleaner_diagnostics(
         &self,
     ) -> Result<nddev_device_sync_cleaner::Diagnostics, AgentError> {
-        self.observe("cleaner", async {
+        self.observe("cleaner", |cancellation| async move {
             self.cleaner
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
-                .diagnose(self.cancellation.clone())
+                .diagnose(cancellation)
                 .await
                 .map_err(io_error)
         })
@@ -253,11 +279,11 @@ impl NativeAgent {
     pub async fn cleaner_preview(
         &self,
     ) -> Result<nddev_device_sync_cleaner::CleanerRunSummary, AgentError> {
-        self.observe("cleaner", async {
+        self.observe("cleaner", |cancellation| async move {
             self.cleaner
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
-                .preview(self.cancellation.clone())
+                .preview(cancellation)
                 .await
                 .map_err(io_error)
         })
@@ -267,11 +293,11 @@ impl NativeAgent {
     pub async fn cleaner_last_run(
         &self,
     ) -> Result<nddev_device_sync_cleaner::CleanerRunSummary, AgentError> {
-        self.observe("cleaner", async {
+        self.observe("cleaner", |cancellation| async move {
             self.cleaner
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
-                .last_run(self.cancellation.clone())
+                .last_run(cancellation)
                 .await
                 .map_err(io_error)
         })
@@ -279,11 +305,11 @@ impl NativeAgent {
     }
 
     pub async fn update_plan(&self) -> Result<nddev_device_sync_updater::Plan, AgentError> {
-        self.observe("updater", async {
+        self.observe("updater", |cancellation| async move {
             self.updater
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
-                .plan(self.cancellation.clone())
+                .plan(cancellation)
                 .await
                 .map_err(io_error)
         })
@@ -293,11 +319,11 @@ impl NativeAgent {
     pub async fn update_last_run(
         &self,
     ) -> Result<nddev_device_sync_updater::UpdateRunSummary, AgentError> {
-        self.observe("updater", async {
+        self.observe("updater", |cancellation| async move {
             self.updater
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
-                .last_run(self.cancellation.clone())
+                .last_run(cancellation)
                 .await
                 .map_err(io_error)
         })
@@ -308,13 +334,13 @@ impl NativeAgent {
         &self,
         path: &Path,
     ) -> Result<nddev_device_sync_gds::Status, AgentError> {
-        self.observe("gds", async {
+        self.observe("gds", |cancellation| async move {
             // Fixed sibling and build-embedded digest, never runtime PATH/env.
             bundled_git_worker()?.ok_or(AgentError::Unavailable)?;
             self.gds
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
-                .status(path, self.cancellation.clone())
+                .status(path, cancellation)
                 .await
         })
         .await
@@ -323,11 +349,11 @@ impl NativeAgent {
     pub async fn remote_sessions(
         &self,
     ) -> Result<nddev_device_sync_rds::RemoteSnapshot, AgentError> {
-        self.observe("rds", async {
+        self.observe("rds", |cancellation| async move {
             self.rds
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
-                .sessions(self.cancellation.clone())
+                .sessions(cancellation)
                 .await
                 .map_err(io_error)
         })
@@ -397,6 +423,36 @@ fn executable(name: &str) -> Option<PathBuf> {
 mod tests {
     use super::*;
     #[tokio::test]
+    async fn invalidated_work_cannot_restore_observation_or_cancel_another_module() {
+        let agent = NativeAgent::discover().unwrap();
+        let other = agent
+            .modules
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|slot| slot.state.id == "clipboard")
+            .unwrap()
+            .lifetime
+            .clone();
+        let result = agent
+            .observe("sysinfo", |_| async {
+                agent.invalidate_module("sysinfo")?;
+                Ok(())
+            })
+            .await;
+        assert!(matches!(result, Err(AgentError::Cancelled)));
+        assert!(!other.is_cancelled());
+        let slots = agent.modules.lock().unwrap();
+        let changed = slots
+            .iter()
+            .find(|slot| slot.state.id == "sysinfo")
+            .unwrap();
+        assert!(!changed.lifetime.is_cancelled());
+        assert!(changed.state.observed_at_ms.is_none());
+        assert!(changed.state.reachability == Reachability::NotChecked);
+    }
+
+    #[tokio::test]
     async fn unsupported_manifest_platform_is_refused_before_io() {
         let mut agent = NativeAgent::discover().unwrap();
         agent.platform = Platform::Windows;
@@ -404,7 +460,7 @@ mod tests {
             panic!("unsupported manifest platform entered adapter I/O")
         });
         assert!(matches!(
-            agent.observe("gds", work).await,
+            agent.observe("gds", |_| work).await,
             Err(AgentError::UnsupportedPlatform)
         ));
         let state = agent

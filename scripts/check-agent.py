@@ -113,6 +113,8 @@ with tempfile.TemporaryDirectory(prefix="nds-agent-provider-") as temporary:
             time.sleep(0.02)
         subprocess.run([str(executable), "--ignored", "closing_an_in_flight_query_preserves_unobserved_state"],
                        env={**environment, "NDS_PAUSED_PROVIDER": "1"}, check=True, timeout=15)
+        subprocess.run([str(executable), "--ignored", "invalidating_a_module_cancels_its_actual_query_without_refreshing_health"],
+                       env={**environment, "NDS_PAUSED_PROVIDER": "1"}, check=True, timeout=15)
         subprocess.run([str(executable), "--ignored", "native_timeout_uses_core_failure_observation_and_error_span"],
                        env={**environment, "NDS_PAUSED_PROVIDER": "1"}, check=True, timeout=15)
     finally:
