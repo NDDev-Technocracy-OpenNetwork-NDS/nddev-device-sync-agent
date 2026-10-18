@@ -6,6 +6,7 @@ use nddev_device_sync_adapter_io::ProcessRequest;
 use nddev_device_sync_vault::VaultClient;
 use serde_json::Value;
 use std::{sync::Arc, time::Duration};
+use tokio::io::AsyncReadExt;
 use zeroize::Zeroizing;
 #[tokio::test]
 #[ignore = "requires an owned fixture and official GitHub CLI; optional isolated test credential"]
@@ -142,17 +143,77 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
         .unwrap()
         .id;
     let mut lists = Vec::new();
-    for _ in 0..2 {
-        let output = tokio::time::timeout(
-            Duration::from_secs(60),
-            tokio::process::Command::new(env!("CARGO_BIN_EXE_nds-agent"))
-                .args(["--server", endpoint, "vault", "list"])
-                .env("XDG_STATE_HOME", root.path())
-                .output(),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+    for index in 0..2 {
+        let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_nds-agent"))
+            .args(["--server", endpoint, "vault", "list"])
+            .env("XDG_STATE_HOME", root.path())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
+        let mut out = tokio::spawn(async move {
+            let mut bytes = Vec::new();
+            stdout
+                .take(1024 * 1024 + 1)
+                .read_to_end(&mut bytes)
+                .await
+                .unwrap();
+            bytes
+        });
+        let mut err = tokio::spawn(async move {
+            let mut bytes = Vec::new();
+            stderr
+                .take(32 * 1024 * 1024 + 1)
+                .read_to_end(&mut bytes)
+                .await
+                .unwrap();
+            bytes
+        });
+        let status = tokio::time::timeout(Duration::from_secs(60), child.wait()).await;
+        if status.is_err() {
+            child.start_kill().unwrap();
+            tokio::time::timeout(Duration::from_secs(5), child.wait())
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        let stdout = tokio::time::timeout(Duration::from_secs(5), &mut out).await;
+        let stderr = tokio::time::timeout(Duration::from_secs(5), &mut err).await;
+        if stdout.is_err() {
+            out.abort();
+        }
+        if stderr.is_err() {
+            err.abort();
+        }
+        let stdout = stdout
+            .expect("CLI stdout remained open after process exit")
+            .unwrap();
+        let logs = stderr
+            .expect("CLI stderr remained open after process exit")
+            .unwrap();
+        assert!(stdout.len() <= 1024 * 1024);
+        assert!(logs.len() <= 32 * 1024 * 1024);
+        assert!(
+            !logs
+                .windows(secret.len())
+                .any(|value| value == secret.as_bytes())
+        );
+        if let Ok(path) = std::env::var("NDS_TEST_CLI_EVIDENCE_FILE") {
+            let path = std::path::PathBuf::from(path).with_extension(format!("list-{index}.jsonl"));
+            assert!(path.is_absolute() && !path.starts_with(env!("CARGO_MANIFEST_DIR")));
+            std::fs::write(path, &logs).unwrap();
+        }
+        let output = std::process::Output {
+            status: status
+                .expect("real CLI exceeded its deadline; owned diagnostics retained")
+                .unwrap(),
+            stdout,
+            stderr: logs,
+        };
         assert!(output.status.success());
         let page: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(page["operation"], "vault.list");
