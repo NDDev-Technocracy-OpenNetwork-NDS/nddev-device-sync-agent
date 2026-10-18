@@ -9,7 +9,7 @@ repository.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 nddev-device-sync-adapter-io = { version = "=0.0.1-alpha.4", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-agent", rev = "fba131111837ce1fe6c82ce6df9e3d19420f62e7" }
-nddev-device-sync-telemetry = { version = "=0.0.1-alpha.11", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-observability", rev = "2526e5f7a6926e5bb8957dfb7edcb63209fa1ca4" }
+nddev-device-sync-telemetry = { version = "=0.0.1-alpha.11", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-observability", rev = "32f21f8a8f9c313bee9dcd1769c042133b5520da" }
 serde_json = "1"
 sha2 = "0.11.1"
 base16ct = { version = "1.0", features = ["alloc"] }
@@ -18,16 +18,16 @@ tracing = "0.1"
 [dependencies]
 nddev-device-sync-domain = { version = "=0.0.12", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-core.git", rev = "0135c86b2887c7cea96c0f1082d70560bde00cc6" }
 nddev-device-sync-sysinfo = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-sysinfo", rev = "e03cf1c588cc1e50fdc91d2adb8af8460f89ef52" }
-nddev-device-sync-clipboard = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-clipboard", rev = "7209d1aa5e86d3a3952fd178a721cf38b3e8dd7a" }
+nddev-device-sync-clipboard = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-clipboard", rev = "2ae574ecd46abd40975f7fe9912a302f09e57b94" }
 nddev-device-sync-cleaner = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-cleaner", rev = "37e6fa14ae7c66a44029ccf700fed39fee34531a" }
 nddev-device-sync-updater = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-updater", rev = "1fd65d33ed999a736cd0227e9616cf9600b529a9" }
-nddev-device-sync-gds = { version = "=0.0.1-alpha.6", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds", rev = "0b9d54de93445cbc5665ae549b94fb503b962f37" }
+nddev-device-sync-gds = { version = "=0.0.1-alpha.6", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds", rev = "1374ed5e897a4103f52913771c571e553a2bf471" }
 nddev-device-sync-rds = { version = "=0.0.1-alpha.2", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-rds", rev = "536dd4e71c311e0773a836c7abbe4151f080a257" }
 
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
-nddev-device-sync-telemetry = { version = "=0.0.1-alpha.11", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-observability", rev = "2526e5f7a6926e5bb8957dfb7edcb63209fa1ca4", features = ["client-traces"] }
+nddev-device-sync-telemetry = { version = "=0.0.1-alpha.11", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-observability", rev = "32f21f8a8f9c313bee9dcd1769c042133b5520da", features = ["client-traces"] }
 prost = "0.14"
 opentelemetry-proto = { version = "0.33.1", default-features = false, features = ["gen-tonic-messages", "trace"] }
 
