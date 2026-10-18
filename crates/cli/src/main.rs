@@ -5,9 +5,16 @@ use nddev_device_sync_adapter_io::{
     CancellationToken, CredentialEnvironment, NativeIo, ProcessInput, ProcessRequest,
 };
 use nddev_device_sync_telemetry::client_traces::ClientTraces;
-use nddev_device_sync_vault::VaultClient;
+use nddev_device_sync_vault::{
+    VaultClient,
+    replication::{ReplicaContext, ReplicaTask},
+};
 use serde_json::{Value, json};
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tracing::Instrument;
 use zeroize::Zeroizing;
 
@@ -64,28 +71,56 @@ async fn operation(
             .map_err(|_| "device_unavailable")?;
     }
     *export_identity = Some(identity.clone());
-    let vault = VaultClient::new(identity, data_directory()?)
-        .await
-        .map_err(|_| "vault_unavailable")?;
+    let vault = Arc::new(
+        VaultClient::new(identity.clone(), data_directory()?)
+            .await
+            .map_err(|_| "vault_unavailable")?,
+    );
     let offline = view.offline_authorized;
-    let mut current = offline;
-    for _ in 0..if offline { 0 } else { 16 } {
-        match vault.synchronize().await {
-            Ok(view) if !view.catching_up => {
-                current = true;
-                break;
+    if !offline {
+        let lifetime = identity.local_use_lifetime();
+        let fence = identity
+            .local_use_fence_from(&lifetime)
+            .await
+            .map_err(|_| "identity_unavailable")?;
+        let schedule = Arc::new(Mutex::new(Default::default()));
+        let publication = Arc::new(Mutex::new(()));
+        let mut replica = {
+            let context = ReplicaContext {
+                identity: identity.clone(),
+                vault: Arc::downgrade(&vault),
+                publication: publication.clone(),
+                policy_slot: Arc::new(Mutex::new(schedule.clone())),
+                schedule,
+                client_version: None,
+            };
+            let _publication = publication.lock().unwrap_or_else(|e| e.into_inner());
+            identity
+                .check_local_use_lifetime(&fence)
+                .map_err(|_| "identity_unavailable")?;
+            ReplicaTask::spawn(context, Duration::ZERO, true)
+        };
+        let mut updates = replica.updates();
+        let current = async {
+            loop {
+                updates.changed().await.map_err(|_| "vault_unavailable")?;
+                let result = updates.borrow_and_update().clone();
+                match result {
+                    Some(Ok(view)) if !view.catching_up => return Ok(()),
+                    Some(Ok(_)) | Some(Err(nddev_device_sync_vault::Error::Busy)) | None => {}
+                    Some(Err(nddev_device_sync_vault::Error::CapacityExhausted)) => {
+                        return Err("sync_capacity_exhausted");
+                    }
+                    Some(Err(_)) => return Err("vault_unavailable"),
+                }
             }
-            Ok(_) | Err(nddev_device_sync_vault::Error::Busy) => {
-                tokio::time::sleep(Duration::from_millis(100)).await
-            }
-            Err(nddev_device_sync_vault::Error::CapacityExhausted) => {
-                return Err("sync_capacity_exhausted");
-            }
-            Err(_) => return Err("vault_unavailable"),
         }
-    }
-    if !current {
-        return Err("replica_catching_up");
+        .await;
+        // End the bounded replica before point-of-use credential/provider I/O.
+        if let Some(task) = replica.cancel() {
+            task.join().await;
+        }
+        current?;
     }
     match (command.as_str(), remaining) {
         ("list", [] | [_]) => {
