@@ -109,12 +109,20 @@ async fn operation(
                     event.name = "agent.replica.observed",
                     module = "vault",
                     outcome = match &result {
+                        Some(Ok(view)) if !view.sync_error.is_empty() => "error",
                         Some(Ok(view)) if !view.catching_up => "ok",
                         Some(Err(_)) => "error",
                         _ => "pending",
                     }
                 );
                 match result {
+                    Some(Ok(view)) if !view.sync_error.is_empty() => {
+                        return Err(match view.sync_error.as_str() {
+                            "sync_basis_expired" => "sync_basis_expired",
+                            "sync_legacy_outcome_unknown" => "sync_legacy_outcome_unknown",
+                            _ => "vault_unavailable",
+                        });
+                    }
                     Some(Ok(view)) if !view.catching_up => return Ok(()),
                     Some(Ok(_)) | Some(Err(nddev_device_sync_vault::Error::Busy)) | None => {}
                     Some(Err(nddev_device_sync_vault::Error::CapacityExhausted)) => {
@@ -254,7 +262,7 @@ async fn main() {
     };
     span.in_scope(|| match &result {
         Ok(_) => tracing::info!(event.name = "agent.operation.completed", outcome = "ok"),
-        Err(_) => tracing::warn!(event.name = "agent.operation.failed", error.type = "agent_operation", outcome = "error"),
+        Err(error) => tracing::warn!(event.name = "agent.operation.failed", error.type = *error, outcome = "error"),
     });
     drop(span);
     // Flush after the foreground capability completes. Background telemetry
