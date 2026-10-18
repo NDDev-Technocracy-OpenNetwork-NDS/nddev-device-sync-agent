@@ -105,6 +105,15 @@ async fn operation(
             loop {
                 updates.changed().await.map_err(|_| "vault_unavailable")?;
                 let result = updates.borrow_and_update().clone();
+                tracing::info!(
+                    event.name = "agent.replica.observed",
+                    module = "vault",
+                    outcome = match &result {
+                        Some(Ok(view)) if !view.catching_up => "ok",
+                        Some(Err(_)) => "error",
+                        _ => "pending",
+                    }
+                );
                 match result {
                     Some(Ok(view)) if !view.catching_up => return Ok(()),
                     Some(Ok(_)) | Some(Err(nddev_device_sync_vault::Error::Busy)) | None => {}
