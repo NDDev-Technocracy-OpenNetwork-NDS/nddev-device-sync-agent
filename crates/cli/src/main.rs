@@ -94,6 +94,7 @@ async fn operation(
                         return Err(match view.sync_error.as_str() {
                             "sync_basis_expired" => "sync_basis_expired",
                             "sync_legacy_outcome_unknown" => "sync_legacy_outcome_unknown",
+                            "sync_capacity_exhausted" => "sync_capacity_exhausted",
                             _ => "vault_unavailable",
                         });
                     }
