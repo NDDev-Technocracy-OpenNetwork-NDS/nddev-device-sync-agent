@@ -3062,7 +3062,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-vault"
 version = "0.0.1-alpha.11"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-vault?rev=4d4d0c6300efd17b90963c2a6153e6b6198dbfa8#4d4d0c6300efd17b90963c2a6153e6b6198dbfa8"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-vault?rev=a6e7277b2b7992e1197fc0d840d4722f273f2710#a6e7277b2b7992e1197fc0d840d4722f273f2710"
 dependencies = [
  "base16ct",
  "base64 0.23.1",
@@ -5482,3 +5482,39 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[patch.unused]]
+name = "iroh"
+version = "1.3.0"
+
+[[patch.unused]]
+name = "netlink-packet-core"
+version = "0.8.2"
+
+[[patch.unused]]
+name = "noq"
+version = "1.3.0"
+
+[[patch.unused]]
+name = "noq-proto"
+version = "1.3.0"
+
+[[patch.unused]]
+name = "rds-agent"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "rds-client"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "rds-core"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "rds-desktop"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "rds-net"
+version = "0.1.0"
