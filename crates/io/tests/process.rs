@@ -238,3 +238,79 @@ async fn native_private_input_is_bounded_before_spawn() {
         Err(IoError::InvalidConfiguration)
     ));
 }
+
+#[test]
+#[ignore = "launched as the actual isolated Git-profile child"]
+fn child_git_profile() {
+    assert_eq!(
+        std::env::var("NDS_GITHUB_AUTHORIZATION").unwrap(),
+        "Authorization: Basic generated-invalid-fixture"
+    );
+    assert!(std::env::var_os("GH_TOKEN").is_none());
+    assert!(std::env::var_os("GIT_TRACE").is_none());
+    for (name, expected) in [
+        ("GIT_TERMINAL_PROMPT", "0"),
+        ("GIT_CONFIG_NOSYSTEM", "1"),
+        ("GIT_ATTR_NOSYSTEM", "1"),
+        ("GIT_OPTIONAL_LOCKS", "0"),
+    ] {
+        assert_eq!(std::env::var(name).unwrap(), expected);
+    }
+    assert_eq!(
+        std::env::var("GIT_CONFIG_GLOBAL").unwrap(),
+        if cfg!(windows) { "NUL" } else { "/dev/null" }
+    );
+    print!("isolated Git configuration");
+}
+
+#[tokio::test]
+async fn git_profile_does_not_inherit_global_configuration_or_provider_tokens() {
+    let output = NativeIo::new(1)
+        .unwrap()
+        .process_handle()
+        .git_process(
+            ignored_request("child_git_profile"),
+            Some(zeroize::Zeroizing::new(
+                "Authorization: Basic generated-invalid-fixture".into(),
+            )),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert!(output.status.success());
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("isolated Git configuration")
+    );
+}
+
+#[test]
+#[ignore = "launched as an actual credential-free Git-profile child"]
+fn child_git_local_profile() {
+    assert!(std::env::var_os("NDS_GITHUB_AUTHORIZATION").is_none());
+    assert!(std::env::var_os("GH_TOKEN").is_none());
+    assert_eq!(std::env::var("GIT_CONFIG_NOSYSTEM").unwrap(), "1");
+    assert_eq!(std::env::var("GIT_TERMINAL_PROMPT").unwrap(), "0");
+    print!("no Git credential");
+}
+
+#[tokio::test]
+async fn local_git_reads_have_the_same_isolation_without_an_authorization_header() {
+    let output = NativeIo::new(1)
+        .unwrap()
+        .process_handle()
+        .git_process(
+            ignored_request("child_git_local_profile"),
+            None,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert!(output.status.success());
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("no Git credential")
+    );
+}
