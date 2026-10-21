@@ -3062,7 +3062,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-vault"
 version = "0.0.1-alpha.11"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-vault?rev=acc95b97da2f23c2833164ae6fdb9323a90efe54#acc95b97da2f23c2833164ae6fdb9323a90efe54"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-vault?rev=77349bac371c70f5cbd94c537d45e70ea227cac9#77349bac371c70f5cbd94c537d45e70ea227cac9"
 dependencies = [
  "base16ct",
  "base64 0.23.1",
@@ -3102,6 +3102,7 @@ version = "0.0.1-alpha.8"
 dependencies = [
  "nddev-device-sync-accounts",
  "nddev-device-sync-adapter-io",
+ "nddev-device-sync-domain",
  "nddev-device-sync-telemetry",
  "nddev-device-sync-vault",
  "reqwest",

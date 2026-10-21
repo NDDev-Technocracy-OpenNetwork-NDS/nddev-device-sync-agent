@@ -4,12 +4,44 @@ use nddev_device_sync_accounts::{IdentityClient, telemetry::Delivery};
 use nddev_device_sync_adapter_io::{
     CancellationToken, CredentialEnvironment, NativeIo, ProcessInput, ProcessRequest,
 };
+use nddev_device_sync_domain::repositories::catalog::CredentialSelection;
 use nddev_device_sync_telemetry::client_traces::ClientTraces;
 use nddev_device_sync_vault::{VaultClient, replication::native::NativeReplica};
 use serde_json::{Value, json};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tracing::Instrument;
 use zeroize::Zeroizing;
+
+struct CommandReply {
+    value: Value,
+    durable: bool,
+}
+impl From<Value> for CommandReply {
+    fn from(value: Value) -> Self {
+        Self {
+            value,
+            durable: false,
+        }
+    }
+}
+fn source_error(error: nddev_device_sync_vault::Error) -> &'static str {
+    match error {
+        nddev_device_sync_vault::Error::Busy => "vault_busy",
+        nddev_device_sync_vault::Error::SelectionChanged => "vault_selection_changed",
+        nddev_device_sync_vault::Error::Cancelled => "vault_cancelled",
+        _ => "vault_unavailable",
+    }
+}
+fn shutdown_error(result: &mut Result<CommandReply, &'static str>) {
+    if let Ok(reply) = result
+        && reply.durable
+    {
+        // Shutdown cannot erase an already committed local transaction receipt.
+        reply.value["shutdown_error"] = json!("vault_unavailable");
+    } else {
+        *result = Err("vault_unavailable");
+    }
+}
 
 fn data_directory() -> Result<PathBuf, &'static str> {
     nddev_device_sync_accounts::private_data_directory().map_err(|_| "native_directory_unavailable")
@@ -40,18 +72,17 @@ async fn operation(
         nddev_device_sync_telemetry::ExportFeed,
         nddev_device_sync_telemetry::ExportFeed,
     )>,
-) -> Result<Value, &'static str> {
+) -> Result<CommandReply, &'static str> {
     let [flag, endpoint, scope, command, remaining @ ..] = args else {
         return Err("invalid_arguments");
     };
-    if flag != "--server"
-        || scope != "vault"
-        || args.len() > 6
-        || args.iter().any(|value| value.len() > 2048)
-    {
+    if flag != "--server" || args.len() > 8 || args.iter().any(|value| value.len() > 2048) {
         return Err("invalid_arguments");
     }
-    if command != "list" && command != "use" {
+    if !matches!(
+        (scope.as_str(), command.as_str()),
+        ("vault", "list" | "use") | ("github", "source")
+    ) {
         return Err("unsupported_operation");
     }
     let identity = Arc::new(IdentityClient::new(endpoint).map_err(|_| "invalid_server")?);
@@ -131,18 +162,55 @@ async fn operation(
             .map_err(|_| "vault_unavailable")?;
         current?;
     }
-    match (command.as_str(), remaining) {
-        ("list", [] | [_]) => {
+    match (scope.as_str(), command.as_str(), remaining) {
+        ("github", "source", []) => {
+            let source = vault.github_source().await.map_err(source_error)?;
+            Ok(json!({"operation":"github.source","offline":offline,
+                "record_ref":source.selection.as_ref().map(CredentialSelection::record_ref),
+                "record_revision":source.selection.as_ref().map(|value|value.revision().to_string()),
+                "record_pending_id":source.selection.as_ref().and_then(CredentialSelection::pending_id),
+                "revision":source.revision.to_string(),"pending_id":source.pending_id,
+                "local_revision":source.local_revision.to_string(),"conflicted":source.conflicted}).into())
+        }
+        ("github", "source", [action, rest @ ..]) => {
+            let selection = match (action.as_str(), rest) {
+                ("clear", []) => None,
+                ("select", [record, revision, pending @ ..]) if pending.len() <= 1 => {
+                    let value = revision.parse::<u64>().map_err(|_| "invalid_arguments")?;
+                    if value.to_string() != *revision {
+                        return Err("invalid_arguments");
+                    }
+                    Some(
+                        CredentialSelection::new(record.clone(), value, pending.first().cloned())
+                            .map_err(|_| "invalid_arguments")?,
+                    )
+                }
+                _ => return Err("invalid_arguments"),
+            };
+            let source = vault.github_source().await.map_err(source_error)?;
+            if source.conflicted {
+                return Err("gds_source_conflict");
+            }
+            let receipt = vault
+                .set_github_source(selection, source.revision, source.pending_id)
+                .await
+                .map_err(source_error)?;
+            Ok(CommandReply {
+                value: json!({"operation":"github.source.write","queued":true,"operation_id":receipt.operation_id,"local_revision":receipt.local_revision.to_string(),"offline":offline}),
+                durable: true,
+            })
+        }
+        ("vault", "list", [] | [_]) => {
             let after = remaining.first().map_or("", String::as_str);
             let page = vault
                 .records(after.to_owned())
                 .await
                 .map_err(|_| "vault_unavailable")?;
             Ok(
-                json!({"operation":"vault.list","offline":offline,"last_sync_at":vault.snapshot().last_sync_at,"pending":vault.snapshot().pending,"records":page.items.iter().map(|record|json!({"ref":record.id,"title":record.title,"revision":record.revision,"observed_seq":record.observed_seq,"deleted":record.deleted,"conflicted":record.conflicted,"pending":record.pending_id.is_some()})).collect::<Vec<_>>(),"next_ref":if page.has_more {page.next_after} else {String::new()}}),
+                json!({"operation":"vault.list","offline":offline,"last_sync_at":vault.snapshot().last_sync_at,"pending":vault.snapshot().pending,"records":page.items.iter().map(|record|json!({"ref":record.id,"title":record.title,"revision":record.revision,"observed_seq":record.observed_seq,"deleted":record.deleted,"conflicted":record.conflicted,"pending":record.pending_id.is_some(),"pending_id":record.pending_id})).collect::<Vec<_>>(),"next_ref":if page.has_more {page.next_after} else {String::new()}}).into(),
             )
         }
-        ("use", [record, provider]) => {
+        ("vault", "use", [record, provider]) => {
             let (name, arguments, environment) = match provider.as_str() {
                 "github" => (
                     "gh",
@@ -191,7 +259,7 @@ async fn operation(
                 return Err("provider_credential_rejected");
             }
             Ok(
-                json!({"operation":"vault.use","provider":provider,"verified":true,"replica_offline":offline}),
+                json!({"operation":"vault.use","provider":provider,"verified":true,"replica_offline":offline}).into(),
             )
         }
         _ => Err("invalid_arguments"),
@@ -239,7 +307,7 @@ async fn main() {
     let mut replica_owner = None;
     let arguments = std::env::args_os()
         .skip(1)
-        .take(8)
+        .take(10)
         .map(|value| value.into_string().map_err(|_| "invalid_arguments"))
         .collect::<Result<Vec<_>, _>>();
     let span = nddev_device_sync_telemetry::operation_span("agent", "process")
@@ -264,7 +332,7 @@ async fn main() {
     if let Some(owner) = &replica_owner
         && owner.stop_replication().await.is_err()
     {
-        result = Err("vault_unavailable");
+        shutdown_error(&mut result);
     }
     span.in_scope(|| match &result {
         Ok(_) => tracing::info!(event.name = "agent.operation.completed", outcome = "ok"),
@@ -287,10 +355,12 @@ async fn main() {
     };
     drop(delivery);
     if NativeReplica::shutdown().await.is_err() {
-        result = Err("vault_unavailable");
+        shutdown_error(&mut result);
     }
     let success = result.is_ok();
-    let mut output = result.unwrap_or_else(|error| json!({"error":error}));
+    let mut output = result
+        .map(|reply| reply.value)
+        .unwrap_or_else(|error| json!({"error":error}));
     output["diagnostics"] = observed.map_or_else(|| json!({"export":"unavailable"}), |state| json!({
         "export":match state.policy {nddev_device_sync_accounts::telemetry::ExportPolicy::Unknown=>"unknown",nddev_device_sync_accounts::telemetry::ExportPolicy::Enabled=>"enabled",nddev_device_sync_accounts::telemetry::ExportPolicy::Disabled=>"disabled"},
         "acknowledged_events":state.delivered,"acknowledged_spans":state.spans_delivered,
