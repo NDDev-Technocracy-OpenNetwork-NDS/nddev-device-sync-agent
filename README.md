@@ -33,6 +33,13 @@ and credentials are never returned. Sign in through NDS first. The CLI uses the
 same native session/device/vault stores and reconciles the server replica before
 use; conflicts, revocation and incomplete catch-up deny secret consumption.
 
+`github source` reads the encrypted account-wide GitHub choice.
+`github source select <ref> <revision> [pending_id]` saves a record version from
+`vault list`; `github source clear` removes the choice. Writes return their
+durable local queue receipt. Other replicas receive the choice through ordinary
+NDS synchronization; selecting it grants neither device permissions nor GitHub
+access. Conflicted settings remain blocked.
+
 The CLI reserves stdout for one JSON operation result; the shared bounded SDK
 writes redacted diagnostics to stderr. It uses the same accounts sender for
 signed events and actual native spans, reporting transport acknowledgements,
@@ -43,6 +50,9 @@ Provider acceptance never extracts a working CLI account token into fixtures.
 The default real GitHub check uses a generated invalid value and verifies denial
 without secret/output leakage. A successful provider check requires an explicitly
 supplied isolated test account credential via `NDS_TEST_ISOLATED_GITHUB_TOKEN_FILE`.
+With a shared mutable Cargo cache, native acceptance can use
+`NDS_TEST_CLI_BINARY` to select an absolute frozen CLI artifact whose source
+and digest were verified before the run.
 
 Linux GDS uses the bundled Rust worker from the locked GDS dependency and the
 native module graph's IO341 process owner. Build it with
