@@ -8,6 +8,107 @@ use serde_json::Value;
 use std::{sync::Arc, time::Duration};
 use tokio::io::AsyncReadExt;
 use zeroize::Zeroizing;
+fn cli_binary() -> std::path::PathBuf {
+    let binary = std::env::var_os("NDS_TEST_CLI_BINARY")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| env!("CARGO_BIN_EXE_nds-agent").into());
+    assert!(binary.is_absolute() && binary.is_file());
+    binary
+}
+async fn actual_cli(
+    endpoint: &str,
+    arguments: &[&str],
+    directory: &std::path::Path,
+    secret: &str,
+    evidence: &str,
+) -> (bool, Value) {
+    let mut child = tokio::process::Command::new(cli_binary())
+        .args(["--server", endpoint])
+        .args(arguments)
+        .env("XDG_STATE_HOME", directory)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let mut out = tokio::spawn(async move {
+        let mut bytes = Vec::new();
+        stdout
+            .take(1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .await
+            .unwrap();
+        bytes
+    });
+    let mut err = tokio::spawn(async move {
+        let mut bytes = Vec::new();
+        stderr
+            .take(32 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .await
+            .unwrap();
+        bytes
+    });
+    let status = tokio::time::timeout(Duration::from_secs(60), child.wait()).await;
+    if status.is_err() {
+        child.start_kill().unwrap();
+        tokio::time::timeout(Duration::from_secs(5), child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    let stdout = tokio::time::timeout(Duration::from_secs(5), &mut out).await;
+    let stderr = tokio::time::timeout(Duration::from_secs(5), &mut err).await;
+    if stdout.is_err() {
+        out.abort();
+    }
+    if stderr.is_err() {
+        err.abort();
+    }
+    let stdout = stdout
+        .expect("CLI stdout remained open after process exit")
+        .unwrap();
+    let logs = stderr
+        .expect("CLI stderr remained open after process exit")
+        .unwrap();
+    assert!(stdout.len() <= 1024 * 1024);
+    assert!(logs.len() <= 32 * 1024 * 1024);
+    assert!(
+        !logs
+            .windows(secret.len())
+            .any(|value| value == secret.as_bytes())
+    );
+    if let Ok(path) = std::env::var("NDS_TEST_CLI_EVIDENCE_FILE") {
+        let path = std::path::PathBuf::from(path).with_extension(format!("{evidence}.jsonl"));
+        assert!(path.is_absolute() && !path.starts_with(env!("CARGO_MANIFEST_DIR")));
+        std::fs::write(path, &logs).unwrap();
+    }
+    let output = std::process::Output {
+        status: status
+            .expect("real CLI exceeded its deadline; owned diagnostics retained")
+            .unwrap(),
+        stdout,
+        stderr: logs,
+    };
+    let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        !output
+            .stdout
+            .windows(secret.len())
+            .any(|value| value == secret.as_bytes())
+    );
+    assert!(
+        !output
+            .stderr
+            .windows(secret.len())
+            .any(|value| value == secret.as_bytes())
+    );
+    (output.status.success(), page)
+}
+
 #[tokio::test]
 #[ignore = "requires an owned --fixture-sync3 fixture and official GitHub CLI; optional isolated test credential"]
 async fn actual_native_vault_reference_drives_official_github_cli() {
@@ -176,91 +277,16 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
         .id;
     let mut lists = Vec::new();
     for index in 0..2 {
-        let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_nds-agent"))
-            .args(["--server", endpoint, "vault", "list"])
-            .env("XDG_STATE_HOME", root.path())
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .unwrap();
-        let stdout = child.stdout.take().unwrap();
-        let stderr = child.stderr.take().unwrap();
-        let mut out = tokio::spawn(async move {
-            let mut bytes = Vec::new();
-            stdout
-                .take(1024 * 1024 + 1)
-                .read_to_end(&mut bytes)
-                .await
-                .unwrap();
-            bytes
-        });
-        let mut err = tokio::spawn(async move {
-            let mut bytes = Vec::new();
-            stderr
-                .take(32 * 1024 * 1024 + 1)
-                .read_to_end(&mut bytes)
-                .await
-                .unwrap();
-            bytes
-        });
-        let status = tokio::time::timeout(Duration::from_secs(60), child.wait()).await;
-        if status.is_err() {
-            child.start_kill().unwrap();
-            tokio::time::timeout(Duration::from_secs(5), child.wait())
-                .await
-                .unwrap()
-                .unwrap();
-        }
-        let stdout = tokio::time::timeout(Duration::from_secs(5), &mut out).await;
-        let stderr = tokio::time::timeout(Duration::from_secs(5), &mut err).await;
-        if stdout.is_err() {
-            out.abort();
-        }
-        if stderr.is_err() {
-            err.abort();
-        }
-        let stdout = stdout
-            .expect("CLI stdout remained open after process exit")
-            .unwrap();
-        let logs = stderr
-            .expect("CLI stderr remained open after process exit")
-            .unwrap();
-        assert!(stdout.len() <= 1024 * 1024);
-        assert!(logs.len() <= 32 * 1024 * 1024);
-        assert!(
-            !logs
-                .windows(secret.len())
-                .any(|value| value == secret.as_bytes())
-        );
-        if let Ok(path) = std::env::var("NDS_TEST_CLI_EVIDENCE_FILE") {
-            let path = std::path::PathBuf::from(path).with_extension(format!("list-{index}.jsonl"));
-            assert!(path.is_absolute() && !path.starts_with(env!("CARGO_MANIFEST_DIR")));
-            std::fs::write(path, &logs).unwrap();
-        }
-        let output = std::process::Output {
-            status: status
-                .expect("real CLI exceeded its deadline; owned diagnostics retained")
-                .unwrap(),
-            stdout,
-            stderr: logs,
-        };
-        assert!(output.status.success());
-        let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let (success, page) = actual_cli(
+            endpoint,
+            &["vault", "list"],
+            root.path(),
+            &secret,
+            &format!("list-{index}"),
+        )
+        .await;
+        assert!(success);
         assert_eq!(page["operation"], "vault.list");
-        assert!(
-            !output
-                .stdout
-                .windows(secret.len())
-                .any(|value| value == secret.as_bytes())
-        );
-        assert!(
-            !output
-                .stderr
-                .windows(secret.len())
-                .any(|value| value == secret.as_bytes())
-        );
         lists.push(page["records"].clone());
     }
     assert_eq!(
@@ -274,9 +300,78 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
             .iter()
             .any(|record| record["ref"] == reference)
     );
+    // Each command is a fresh real process, sharing only this fixture's native
+    // credentials and encrypted SQLite replica. No provider grant is inferred.
+    let (success, absent) = actual_cli(
+        endpoint,
+        &["github", "source"],
+        root.path(),
+        &secret,
+        "source-absent",
+    )
+    .await;
+    assert!(success && absent["record_ref"].is_null());
+    let record = lists[0]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["ref"] == reference)
+        .unwrap();
+    let revision = record["revision"].as_u64().unwrap().to_string();
+    let (success, selected) = actual_cli(
+        endpoint,
+        &["github", "source", "select", &reference, &revision],
+        root.path(),
+        &secret,
+        "source-select",
+    )
+    .await;
+    assert!(success && selected["queued"] == true && selected["operation_id"].is_string());
+    let (success, restored) = actual_cli(
+        endpoint,
+        &["github", "source"],
+        root.path(),
+        &secret,
+        "source-restored",
+    )
+    .await;
+    assert!(success);
+    assert_eq!(restored["record_ref"], reference);
+    assert_eq!(restored["record_revision"], revision);
+    assert_eq!(restored["revision"], "1");
+    assert!(restored["pending_id"].is_null() && restored["conflicted"] == false);
+    let (success, refused) = actual_cli(
+        endpoint,
+        &["github", "source", "select", "absent-credential", "0"],
+        root.path(),
+        &secret,
+        "source-refused",
+    )
+    .await;
+    assert!(!success);
+    assert_eq!(refused["error"], "vault_selection_changed");
+    let (success, cleared) = actual_cli(
+        endpoint,
+        &["github", "source", "clear"],
+        root.path(),
+        &secret,
+        "source-clear",
+    )
+    .await;
+    assert!(success && cleared["queued"] == true);
+    let (success, empty) = actual_cli(
+        endpoint,
+        &["github", "source"],
+        root.path(),
+        &secret,
+        "source-cleared-reopen",
+    )
+    .await;
+    assert!(success && empty["record_ref"].is_null());
+    assert_eq!(empty["revision"], "2");
     let credentials = identity.vault_credentials().unwrap();
     let command = ProcessRequest {
-        executable: std::path::PathBuf::from(env!("CARGO_BIN_EXE_nds-agent")),
+        executable: cli_binary(),
         arguments: ["--server", endpoint, "vault", "use", &reference, "github"]
             .into_iter()
             .map(Into::into)
