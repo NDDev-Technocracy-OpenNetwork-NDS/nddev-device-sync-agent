@@ -33,6 +33,9 @@ pub struct ProcessInput {
 #[derive(Clone, Copy)]
 pub enum CredentialEnvironment {
     GitHub,
+    /// A pre-encoded GitHub HTTPS Authorization header, used only through
+    /// Git's --config-env. No terminal, ambient Git config or credential helper.
+    GitHttps,
     Cloudflare,
     DigitalOcean,
 }
@@ -40,6 +43,7 @@ impl CredentialEnvironment {
     fn name(self) -> &'static str {
         match self {
             Self::GitHub => "GH_TOKEN",
+            Self::GitHttps => "NDS_GITHUB_AUTHORIZATION",
             Self::Cloudflare => "CLOUDFLARE_API_TOKEN",
             Self::DigitalOcean => "DIGITALOCEAN_ACCESS_TOKEN",
         }
@@ -201,6 +205,17 @@ impl ProcessIo {
                 .stderr(Stdio::piped());
             if let Some((name, value)) = &input.credential {
                 command.env(name.name(), value.as_str());
+                if matches!(name, CredentialEnvironment::GitHttps) {
+                    command
+                        .env("GIT_TERMINAL_PROMPT", "0")
+                        .env("GIT_CONFIG_NOSYSTEM", "1")
+                        .env(
+                            "GIT_CONFIG_GLOBAL",
+                            if cfg!(windows) { "NUL" } else { "/dev/null" },
+                        )
+                        .env("GIT_ATTR_NOSYSTEM", "1")
+                        .env("GIT_OPTIONAL_LOCKS", "0");
+                }
             }
         });
         command.wrap(KillOnDrop);

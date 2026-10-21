@@ -238,3 +238,56 @@ async fn native_private_input_is_bounded_before_spawn() {
         Err(IoError::InvalidConfiguration)
     ));
 }
+
+#[test]
+#[ignore = "launched as the actual isolated Git-profile child"]
+fn child_git_profile() {
+    assert_eq!(
+        std::env::var("NDS_GITHUB_AUTHORIZATION").unwrap(),
+        "Authorization: Basic generated-invalid-fixture"
+    );
+    assert!(std::env::var_os("GH_TOKEN").is_none());
+    assert!(std::env::var_os("GIT_TRACE").is_none());
+    for (name, expected) in [
+        ("GIT_TERMINAL_PROMPT", "0"),
+        ("GIT_CONFIG_NOSYSTEM", "1"),
+        ("GIT_ATTR_NOSYSTEM", "1"),
+        ("GIT_OPTIONAL_LOCKS", "0"),
+    ] {
+        assert_eq!(std::env::var(name).unwrap(), expected);
+    }
+    assert_eq!(
+        std::env::var("GIT_CONFIG_GLOBAL").unwrap(),
+        if cfg!(windows) { "NUL" } else { "/dev/null" }
+    );
+    print!("isolated Git configuration");
+}
+
+#[tokio::test]
+async fn git_profile_does_not_inherit_global_configuration_or_provider_tokens() {
+    use nddev_device_sync_adapter_io::{CredentialEnvironment, ProcessInput};
+    let output = NativeIo::new(1)
+        .unwrap()
+        .process_handle()
+        .process_input(
+            ignored_request("child_git_profile"),
+            ProcessInput {
+                stdin: Default::default(),
+                credential: Some((
+                    CredentialEnvironment::GitHttps,
+                    zeroize::Zeroizing::new(
+                        "Authorization: Basic generated-invalid-fixture".into(),
+                    ),
+                )),
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert!(output.status.success());
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("isolated Git configuration")
+    );
+}
