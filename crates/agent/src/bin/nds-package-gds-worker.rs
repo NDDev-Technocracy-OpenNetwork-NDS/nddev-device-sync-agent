@@ -84,8 +84,15 @@ mod qualified {
         }
         fs::create_dir_all(&bundle)?;
         let bundle = bundle.canonicalize()?;
-        // Distinct target directory avoids taking the host build's Cargo lock.
-        let build = bundle.join(".gds-worker-build");
+        // Keep the nested build's lock separate from the host and reuse its
+        // immutable provider artifacts across different bundle staging paths.
+        let build = PathBuf::from(
+            metadata["target_directory"]
+                .as_str()
+                .ok_or("missing Cargo target directory")?,
+        )
+        .join("providers/gds")
+        .join(revision);
         let status = Command::new("cargo")
             .args([
                 "build",
@@ -100,6 +107,7 @@ mod qualified {
             .arg(&manifest)
             .arg("--target-dir")
             .arg(&build)
+            .env("CARGO_BUILD_BUILD_DIR", build.join("build"))
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
