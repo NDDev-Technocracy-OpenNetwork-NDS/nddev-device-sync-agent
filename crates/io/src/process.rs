@@ -33,9 +33,6 @@ pub struct ProcessInput {
 #[derive(Clone, Copy)]
 pub enum CredentialEnvironment {
     GitHub,
-    /// A pre-encoded GitHub HTTPS Authorization header, used only through
-    /// Git's --config-env. No terminal, ambient Git config or credential helper.
-    GitHttps,
     Cloudflare,
     DigitalOcean,
 }
@@ -43,7 +40,6 @@ impl CredentialEnvironment {
     fn name(self) -> &'static str {
         match self {
             Self::GitHub => "GH_TOKEN",
-            Self::GitHttps => "NDS_GITHUB_AUTHORIZATION",
             Self::Cloudflare => "CLOUDFLARE_API_TOKEN",
             Self::DigitalOcean => "DIGITALOCEAN_ACCESS_TOKEN",
         }
@@ -55,6 +51,11 @@ pub struct ProcessOutput {
     pub status: ExitStatus,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
+}
+
+enum ProcessProfile {
+    Native,
+    Git(Option<Zeroizing<String>>),
 }
 
 struct OwnedChild {
@@ -136,8 +137,39 @@ impl ProcessIo {
         input: ProcessInput,
         cancellation: CancellationToken,
     ) -> Result<ProcessOutput, IoError> {
+        self.process_owned(request, input, cancellation, ProcessProfile::Native)
+            .await
+    }
+
+    /// The same bounded child owner with isolated Git configuration. Local
+    /// reads receive no credential; only a caller's network operation lends a
+    /// pre-encoded HTTPS header through Git's --config-env.
+    pub async fn git_process(
+        &self,
+        request: ProcessRequest,
+        authorization: Option<Zeroizing<String>>,
+        cancellation: CancellationToken,
+    ) -> Result<ProcessOutput, IoError> {
+        self.process_owned(
+            request,
+            ProcessInput::default(),
+            cancellation,
+            ProcessProfile::Git(authorization),
+        )
+        .await
+    }
+
+    async fn process_owned(
+        &self,
+        request: ProcessRequest,
+        input: ProcessInput,
+        cancellation: CancellationToken,
+        profile: ProcessProfile,
+    ) -> Result<ProcessOutput, IoError> {
         let started = Instant::now();
-        let result = self.run_process(request, input, cancellation).await;
+        let result = self
+            .run_process(request, input, cancellation, profile)
+            .await;
         match &result {
             Ok(output) => tracing::info!(
                 event.name = "native.process.completed",
@@ -163,8 +195,10 @@ impl ProcessIo {
         request: ProcessRequest,
         input: ProcessInput,
         cancellation: CancellationToken,
+        profile: ProcessProfile,
     ) -> Result<ProcessOutput, IoError> {
-        if input.stdin.len() > 16_384
+        if matches!(&profile, ProcessProfile::Git(Some(value)) if value.is_empty() || value.len()>16_384 || value.bytes().any(|b| matches!(b,0|b'\r'|b'\n')))
+            || input.stdin.len() > 16_384
             || input.credential.as_ref().is_some_and(|(_, value)| {
                 value.is_empty() || value.len() > 16_384 || value.contains('\0')
             })
@@ -205,17 +239,20 @@ impl ProcessIo {
                 .stderr(Stdio::piped());
             if let Some((name, value)) = &input.credential {
                 command.env(name.name(), value.as_str());
-                if matches!(name, CredentialEnvironment::GitHttps) {
-                    command
-                        .env("GIT_TERMINAL_PROMPT", "0")
-                        .env("GIT_CONFIG_NOSYSTEM", "1")
-                        .env(
-                            "GIT_CONFIG_GLOBAL",
-                            if cfg!(windows) { "NUL" } else { "/dev/null" },
-                        )
-                        .env("GIT_ATTR_NOSYSTEM", "1")
-                        .env("GIT_OPTIONAL_LOCKS", "0");
+            }
+            if let ProcessProfile::Git(authorization) = &profile {
+                if let Some(value) = authorization {
+                    command.env("NDS_GITHUB_AUTHORIZATION", value.as_str());
                 }
+                command
+                    .env("GIT_TERMINAL_PROMPT", "0")
+                    .env("GIT_CONFIG_NOSYSTEM", "1")
+                    .env(
+                        "GIT_CONFIG_GLOBAL",
+                        if cfg!(windows) { "NUL" } else { "/dev/null" },
+                    )
+                    .env("GIT_ATTR_NOSYSTEM", "1")
+                    .env("GIT_OPTIONAL_LOCKS", "0");
             }
         });
         command.wrap(KillOnDrop);
