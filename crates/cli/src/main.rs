@@ -35,6 +35,11 @@ fn executable(name: &str) -> Result<PathBuf, &'static str> {
 async fn operation(
     args: &[String],
     export_identity: &mut Option<Arc<IdentityClient>>,
+    replica_owner: &mut Option<Arc<NativeReplica>>,
+    feeds: &mut Option<(
+        nddev_device_sync_telemetry::ExportFeed,
+        nddev_device_sync_telemetry::ExportFeed,
+    )>,
 ) -> Result<Value, &'static str> {
     let [flag, endpoint, scope, command, remaining @ ..] = args else {
         return Err("invalid_arguments");
@@ -74,6 +79,12 @@ async fn operation(
         let replica = NativeReplica::attach(&identity, data_directory()?, None)
             .await
             .map_err(|_| "vault_unavailable")?;
+        *replica_owner = Some(replica.clone());
+        replica.ensure_delivery(|identity| {
+            feeds
+                .take()
+                .map(|(events, traces)| Delivery::start(identity, events, traces, true))
+        });
         let mut updates = replica.updates().map_err(|_| "vault_unavailable")?;
         let current = async {
             loop {
@@ -108,9 +119,10 @@ async fn operation(
             }
         }
         .await;
-        // The CLI detaches its bounded process owner before point-of-use I/O.
-        // A GUI in another process keeps its own elected owner running.
-        NativeReplica::shutdown()
+        // Drain this process's data work before point-of-use I/O. Its existing
+        // sender retains the independent owner identity until final flushing.
+        replica
+            .stop_replication()
             .await
             .map_err(|_| "vault_unavailable")?;
         vault
@@ -224,6 +236,7 @@ async fn main() {
         std::process::exit(2);
     }
     let mut export_identity = None;
+    let mut replica_owner = None;
     let arguments = std::env::args_os()
         .skip(1)
         .take(8)
@@ -234,15 +247,23 @@ async fn main() {
     let mut result = match arguments {
         Ok(arguments) => tokio::time::timeout(
             Duration::from_secs(120),
-            operation(&arguments, &mut export_identity).instrument(span.clone()),
+            operation(
+                &arguments,
+                &mut export_identity,
+                &mut replica_owner,
+                &mut feeds,
+            )
+            .instrument(span.clone()),
         )
         .await
         .unwrap_or(Err("operation_timeout")),
         Err(error) => Err(error),
     };
-    // Also terminate/drain the retained owner after operation timeout or early
-    // error; the process exporter starts only after this foreground lifetime.
-    if NativeReplica::shutdown().await.is_err() {
+    // Timeout and early error also drain real data work before terminal signals.
+    // The one retained sender can still authenticate this process's final batch.
+    if let Some(owner) = &replica_owner
+        && owner.stop_replication().await.is_err()
+    {
         result = Err("vault_unavailable");
     }
     span.in_scope(|| match &result {
@@ -250,15 +271,24 @@ async fn main() {
         Err(error) => tracing::warn!(event.name = "agent.operation.failed", error.type = *error, outcome = "error"),
     });
     drop(span);
-    // Flush after the foreground capability completes. Background telemetry
-    // must not compete with its native credential-store admission budget.
-    let delivery = export_identity
-        .zip(feeds.take())
-        .map(|(identity, (events, traces))| Delivery::start(identity, events, traces, true));
+    let delivery = replica_owner
+        .as_ref()
+        .and_then(|owner| owner.delivery_handle())
+        .or_else(|| {
+            export_identity
+                .zip(feeds.take())
+                .map(|(identity, (events, traces))| {
+                    Arc::new(Delivery::start(identity, events, traces, true))
+                })
+        });
     let observed = match &delivery {
         Some(delivery) => Some(delivery.flush().await),
         None => None,
     };
+    drop(delivery);
+    if NativeReplica::shutdown().await.is_err() {
+        result = Err("vault_unavailable");
+    }
     let success = result.is_ok();
     let mut output = result.unwrap_or_else(|error| json!({"error":error}));
     output["diagnostics"] = observed.map_or_else(|| json!({"export":"unavailable"}), |state| json!({
@@ -266,7 +296,6 @@ async fn main() {
         "acknowledged_events":state.delivered,"acknowledged_spans":state.spans_delivered,
         "undelivered":state.pending+state.spans_pending,"dropped":state.dropped+state.spans_dropped
     }));
-    drop(delivery);
     if let Some(traces) = traces {
         traces.shutdown();
     }
