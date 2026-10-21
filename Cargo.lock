@@ -3062,7 +3062,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-vault"
 version = "0.0.1-alpha.11"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-vault?rev=77349bac371c70f5cbd94c537d45e70ea227cac9#77349bac371c70f5cbd94c537d45e70ea227cac9"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-vault?rev=f022c2e900936091eabd9bb2d766ef01cb52caf7#f022c2e900936091eabd9bb2d766ef01cb52caf7"
 dependencies = [
  "base16ct",
  "base64 0.23.1",
