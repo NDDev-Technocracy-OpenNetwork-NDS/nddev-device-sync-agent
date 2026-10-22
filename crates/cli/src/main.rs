@@ -81,9 +81,12 @@ async fn operation(
     }
     if !matches!(
         (scope.as_str(), command.as_str()),
-        ("vault", "list" | "use") | ("github", "source")
+        ("vault", "list" | "use") | ("github", "source") | ("sync", "run")
     ) {
         return Err("unsupported_operation");
+    }
+    if scope == "sync" && !remaining.is_empty() {
+        return Err("invalid_arguments");
     }
     let identity = Arc::new(IdentityClient::new(endpoint).map_err(|_| "invalid_server")?);
     let view = identity
@@ -106,16 +109,31 @@ async fn operation(
             .map_err(|_| "vault_unavailable")?,
     );
     let offline = view.offline_authorized;
-    if !offline {
-        let replica = NativeReplica::attach(&identity, data_directory()?, None)
-            .await
-            .map_err(|_| "vault_unavailable")?;
+    if !offline || (scope == "sync" && command == "run") {
+        let replica = NativeReplica::attach(
+            &identity,
+            data_directory()?,
+            (scope == "sync" && command == "run").then(|| env!("CARGO_PKG_VERSION").into()),
+        )
+        .await
+        .map_err(|_| "vault_unavailable")?;
         *replica_owner = Some(replica.clone());
         replica.ensure_delivery(|identity| {
             feeds
                 .take()
                 .map(|(events, traces)| Delivery::start(identity, events, traces, true))
         });
+        if scope == "sync" && command == "run" {
+            replica
+                .catalog(nddev_device_sync_gds::catalog_runtime::CatalogRuntime::new)
+                .map_err(|_| "vault_unavailable")?;
+            if !remaining.is_empty() {
+                return Err("invalid_arguments");
+            }
+            return Ok(
+                json!({"operation":"sync.run","started_offline":offline,"stopped":false}).into(),
+            );
+        }
         let mut updates = replica.updates().map_err(|_| "vault_unavailable")?;
         let current = async {
             loop {
@@ -265,6 +283,52 @@ async fn operation(
         _ => Err("invalid_arguments"),
     }
 }
+async fn stop_signal() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! { result = tokio::signal::ctrl_c() => result, _ = term.recv() => Ok(()) }
+    }
+    #[cfg(not(unix))]
+    tokio::signal::ctrl_c().await
+}
+
+/// Observes the existing owner; this is not another replication scheduler.
+async fn run_owner(owner: &Arc<NativeReplica>) -> Result<Value, &'static str> {
+    let catalog = owner
+        .catalog(nddev_device_sync_gds::catalog_runtime::CatalogRuntime::new)
+        .map_err(|_| "vault_unavailable")?;
+    let mut updates = owner.updates().map_err(|_| "vault_unavailable")?;
+    let stop = stop_signal();
+    tokio::pin!(stop);
+    tracing::info!(
+        event.name = "agent.sync.started",
+        module = "gds",
+        outcome = "ok"
+    );
+    loop {
+        tokio::select! {
+            signal = &mut stop => {
+                signal.map_err(|_| "shutdown_unavailable")?;
+                let observed = catalog.observation().await;
+                return Ok(observed.map_or(Value::Null, |value| json!({
+                    "observed_at_ms":value.observed_at_ms,
+                    "error":value.error.map(|error|error.to_string()),
+                })));
+            }
+            changed = updates.changed() => {
+                changed.map_err(|_| "vault_unavailable")?;
+                if matches!(&*updates.borrow_and_update(), Some(Err(
+                    nddev_device_sync_vault::Error::Locked
+                    | nddev_device_sync_vault::Error::Authentication
+                    | nddev_device_sync_vault::Error::RegistrationRequired))) {
+                    return Err("sign_in_required");
+                }
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let config = nddev_device_sync_telemetry::Config {
@@ -280,6 +344,7 @@ async fn main() {
             "nds_accounts".into(),
             "nddev_device_sync_vault".into(),
             "nddev_device_sync_adapter_io".into(),
+            "nddev_device_sync_gds".into(),
         ],
         default_module: "agent".into(),
         debug: None,
@@ -327,6 +392,21 @@ async fn main() {
         .unwrap_or(Err("operation_timeout")),
         Err(error) => Err(error),
     };
+    if let Ok(reply) = &mut result
+        && reply.value.get("operation").and_then(Value::as_str) == Some("sync.run")
+    {
+        if let Some(owner) = &replica_owner {
+            match run_owner(owner).await {
+                Ok(observation) => {
+                    reply.value["stopped"] = json!(true);
+                    reply.value["gds"] = observation;
+                }
+                Err(error) => result = Err(error),
+            }
+        } else {
+            result = Err("vault_unavailable");
+        }
+    }
     // Timeout and early error also drain real data work before terminal signals.
     // The one retained sender can still authenticate this process's final batch.
     if let Some(owner) = &replica_owner

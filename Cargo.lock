@@ -15,6 +15,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "adler2"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -118,6 +124,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
 dependencies = [
  "rustversion",
+]
+
+[[package]]
+name = "async-compression"
+version = "0.4.51"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d5755640120b24961f8231e05892e4a4f7e0d04e8aeca161508c9c397946970"
+dependencies = [
+ "compression-codecs",
+ "compression-core",
+ "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]
@@ -366,6 +384,23 @@ dependencies = [
  "bytes",
  "memchr",
 ]
+
+[[package]]
+name = "compression-codecs"
+version = "0.4.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cae36683101b2899f48bd31f8db9839437356188e3b1ff23096e73dab09ba8fe"
+dependencies = [
+ "compression-core",
+ "flate2",
+ "memchr",
+]
+
+[[package]]
+name = "compression-core"
+version = "0.4.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ebdda89edc534bf8d5dd2857562633b6495557e5846552ade994b99ed13c36a"
 
 [[package]]
 name = "const-oid"
@@ -859,6 +894,17 @@ name = "fixedbitset"
 version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
+
+[[package]]
+name = "flate2"
+version = "1.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb"
+dependencies = [
+ "crc32fast",
+ "miniz_oxide",
+ "zlib-rs",
+]
 
 [[package]]
 name = "fluent-uri"
@@ -2822,6 +2868,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
+name = "miniz_oxide"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c"
+dependencies = [
+ "adler2",
+ "simd-adler32",
+]
+
+[[package]]
 name = "mio"
 version = "1.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2841,7 +2897,7 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 [[package]]
 name = "nddev-device-sync-accounts"
 version = "0.0.1-alpha.24"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-accounts?rev=6aebbf2e1826fc2de5d3883549af6a53d232951f#6aebbf2e1826fc2de5d3883549af6a53d232951f"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-accounts?rev=59ab75074adfb7c434e994fbaecf8769ac43f5de#59ab75074adfb7c434e994fbaecf8769ac43f5de"
 dependencies = [
  "android-native-keyring-store",
  "apple-native-keyring-store",
@@ -2933,7 +2989,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-application"
 version = "0.0.1-alpha.21"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-core.git?rev=63caf93c1e431c4cbc74414f797ab836083db23e#63caf93c1e431c4cbc74414f797ab836083db23e"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-core.git?rev=6dcffc3d0cb076d26ed706429ac5357bfc3429fa#6dcffc3d0cb076d26ed706429ac5357bfc3429fa"
 dependencies = [
  "nddev-device-sync-domain",
 ]
@@ -2950,7 +3006,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-clipboard"
 version = "0.0.1-alpha.7"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-clipboard?rev=02a33d1e03b5ad216efbf6bf398a768e5e93ae0c#02a33d1e03b5ad216efbf6bf398a768e5e93ae0c"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-clipboard?rev=f4d5ca78c0ba7b3eada1196f9ac09b37088deb9c#f4d5ca78c0ba7b3eada1196f9ac09b37088deb9c"
 dependencies = [
  "arboard",
  "jni 0.21.1",
@@ -2969,7 +3025,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-domain"
 version = "0.0.12"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-core.git?rev=63caf93c1e431c4cbc74414f797ab836083db23e#63caf93c1e431c4cbc74414f797ab836083db23e"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-core.git?rev=6dcffc3d0cb076d26ed706429ac5357bfc3429fa#6dcffc3d0cb076d26ed706429ac5357bfc3429fa"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -2980,15 +3036,31 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-gds"
 version = "0.0.1-alpha.6"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds?rev=ca65b2bc0f531c02522bc2aa460e1856e34839d5#ca65b2bc0f531c02522bc2aa460e1856e34839d5"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds?rev=083cf50062a0ccefb70eade71d50748a9de78085#083cf50062a0ccefb70eade71d50748a9de78085"
 dependencies = [
  "gix",
+ "gloo-timers",
+ "js-sys",
+ "nddev-device-sync-accounts",
  "nddev-device-sync-adapter-io",
  "nddev-device-sync-application",
  "nddev-device-sync-domain",
+ "nddev-device-sync-telemetry",
+ "nddev-device-sync-vault",
+ "reqwest",
  "rustix",
+ "rustls",
  "serde",
  "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+ "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "zeroize",
 ]
 
 [[package]]
@@ -3005,7 +3077,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-rds"
 version = "0.0.1-alpha.2"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-rds?rev=00c0329ee0f689346cde9f33911837f1f2b849d4#00c0329ee0f689346cde9f33911837f1f2b849d4"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-rds?rev=f350288d0d34fe79998b7cbaf18eb9faf7e51049#f350288d0d34fe79998b7cbaf18eb9faf7e51049"
 dependencies = [
  "nddev-device-sync-adapter-io",
  "serde",
@@ -3062,7 +3134,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-vault"
 version = "0.0.1-alpha.11"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-vault?rev=f022c2e900936091eabd9bb2d766ef01cb52caf7#f022c2e900936091eabd9bb2d766ef01cb52caf7"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-vault?rev=746e8a166be9ac2f5b956a5a0cc12df6d541c38f#746e8a166be9ac2f5b956a5a0cc12df6d541c38f"
 dependencies = [
  "base16ct",
  "base64 0.23.1",
@@ -3103,6 +3175,7 @@ dependencies = [
  "nddev-device-sync-accounts",
  "nddev-device-sync-adapter-io",
  "nddev-device-sync-domain",
+ "nddev-device-sync-gds",
  "nddev-device-sync-telemetry",
  "nddev-device-sync-vault",
  "reqwest",
@@ -4144,6 +4217,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "simd-adler32"
+version = "0.3.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
+
+[[package]]
 name = "simd_cesu8"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4546,12 +4625,17 @@ version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840"
 dependencies = [
+ "async-compression",
  "bitflags 2.13.2",
  "bytes",
+ "futures-core",
  "futures-util",
  "http",
  "http-body",
+ "http-body-util",
  "pin-project-lite",
+ "tokio",
+ "tokio-util",
  "tower",
  "tower-layer",
  "tower-service",
@@ -5483,3 +5567,39 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[patch.unused]]
+name = "iroh"
+version = "1.3.0"
+
+[[patch.unused]]
+name = "netlink-packet-core"
+version = "0.8.2"
+
+[[patch.unused]]
+name = "noq"
+version = "1.3.0"
+
+[[patch.unused]]
+name = "noq-proto"
+version = "1.3.0"
+
+[[patch.unused]]
+name = "rds-agent"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "rds-client"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "rds-core"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "rds-desktop"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "rds-net"
+version = "0.1.0"
