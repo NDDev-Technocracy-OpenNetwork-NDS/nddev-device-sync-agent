@@ -1,59 +1,39 @@
 name: NDS checks
+
 on:
   pull_request:
     branches: [main, dev]
-  push:
-    branches: [main, dev]
   workflow_dispatch:
+
 permissions:
   contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   quality:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Install pinned Rust
+      - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
-      - if: runner.os == 'Linux'
+      - name: Install native dependencies
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
-      - name: Format
-        run: cargo fmt --all -- --check
-      - name: Lint
-        run: cargo clippy --locked --workspace --all-targets -- -D warnings
-      - name: Native transport tests
-        run: cargo test --locked --workspace
-      - name: Dependency policy and advisory checks
-        if: runner.os == 'Linux'
+      - name: Install pinned quality tools
         run: |
-          cargo install --locked --version 0.20.2 cargo-deny
+          cargo install --locked --version 0.9.148 cargo-nextest
           cargo install --locked --version 0.22.2 cargo-audit
-          cargo deny check
-          cargo audit
-      - name: Fetch the canonical native test providers
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          cargo metadata --locked --format-version 1 > "$RUNNER_TEMP/nds-metadata.json"
-          python3 - "$RUNNER_TEMP/nds-metadata.json" "$RUNNER_TEMP/native-provider" <<'PY'
-          import json, subprocess, sys
-          from pathlib import Path
-          packages = json.loads(Path(sys.argv[1]).read_text())["packages"]
-          for name in ["sysinfo"]:
-              provider = next(p for p in packages if p["name"] == "nddev-device-sync-" + name)
-              lock = Path(provider["manifest_path"]).parent / "provider.lock.json"
-              destination = Path(sys.argv[2]) / name
-              subprocess.run([sys.executable, "scripts/fetch-provider.py", str(lock), str(destination)], check=True)
-          PY
-      - name: Real assembled agent acceptance
-        if: runner.os == 'Linux'
-        run: python3 scripts/check-agent.py
+          cargo install --locked --version 0.20.2 cargo-deny
+      - name: Run the STD-0004 native Rust contract
+        id: native
+        uses: NDDev-Technocracy-Standarts/std-0004-ci-cd-workflows/.github/actions/ci@a77e385fcf3c1b000c38167ecac7b74bb7715b10 # std-0004-v0.3.1
+      - name: Require complete native results
+        if: ${{ !cancelled() }}
+        env:
+          STATUS: ${{ steps.native.outputs.status }}
+        run: test "$STATUS" = success

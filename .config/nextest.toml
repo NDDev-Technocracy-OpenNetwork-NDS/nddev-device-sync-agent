@@ -1,0 +1,8 @@
+[store]
+dir = ".nddev-reports/nextest"
+
+[profile.ci]
+retries = 0
+
+[profile.ci.junit]
+path = "junit.xml"
