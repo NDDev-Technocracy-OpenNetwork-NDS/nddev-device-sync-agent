@@ -40,6 +40,14 @@ durable local queue receipt. Other replicas receive the choice through ordinary
 NDS synchronization; selecting it grants neither device permissions nor GitHub
 access. Conflicted settings remain blocked.
 
+`sync run` keeps the existing Rust replica owner alive until Ctrl-C or a native
+termination signal. It resumes queued NDS synchronization and the permitted GDS
+catalog without a GUI. Another process observing the same local account follows
+the elected owner and takes over after it exits. It installs no service; ordinary
+point-of-use CLI commands remain bounded and do not start catalog polling. GDS
+provider failures are observed separately from Vault replication. No Git clone,
+commit creation or automatic Git mutation is activated by this command.
+
 The CLI reserves stdout for one JSON operation result; the shared bounded SDK
 writes redacted diagnostics to stderr. It uses the same accounts sender for
 signed events and actual native spans, reporting transport acknowledgements,

@@ -109,6 +109,220 @@ async fn actual_cli(
     (output.status.success(), page)
 }
 
+async fn background_handoff(
+    endpoint: &str,
+    root: &std::path::Path,
+    secret: &str,
+    vault: &VaultClient,
+    identity: &Arc<IdentityClient>,
+) {
+    use nddev_device_sync_domain::modules::control::Configuration;
+    use std::process::Stdio;
+    let setting = vault.module_configuration("gds").await.unwrap();
+    vault
+        .set_module_configuration(
+            "gds".into(),
+            setting.revision,
+            setting.pending_id,
+            Configuration {
+                enabled: true,
+                permissions: nddev_device_sync_gds::catalog_runtime::required_permissions(),
+            },
+        )
+        .await
+        .unwrap();
+    let view = vault.synchronize().await.unwrap();
+    assert!(!view.catching_up && view.pending == 0 && view.sync_error.is_empty());
+    let spawn = |label: &str| {
+        let logs = root.join(format!("catalog-{label}.jsonl"));
+        let child = tokio::process::Command::new(cli_binary())
+            .args(["--server", endpoint, "sync", "run"])
+            .env("XDG_STATE_HOME", root)
+            .kill_on_drop(true)
+            .stdout(Stdio::piped())
+            .stderr(std::fs::File::create(&logs).unwrap())
+            .spawn()
+            .unwrap();
+        (child, logs)
+    };
+    async fn wait_for(path: &std::path::Path, event: &[u8], secret: &str) {
+        tokio::time::timeout(Duration::from_secs(50), async {
+            loop {
+                let logs = std::fs::read(path).unwrap();
+                assert!(logs.len() <= 32 * 1024 * 1024);
+                assert!(
+                    !logs
+                        .windows(secret.len())
+                        .any(|value| value == secret.as_bytes())
+                );
+                let observed = if event == b"gds.catalog.read.failed" {
+                    let rows = logs
+                        .split(|byte| *byte == b'\n')
+                        .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
+                        .collect::<Vec<_>>();
+                    rows.iter()
+                        .filter(|row| row["event.name"] == "gds.catalog.read.failed")
+                        .any(|http| {
+                            rows.iter().any(|page| {
+                                page["event.name"] == "gds.catalog.page.read"
+                                    && page["error.type"] == "dependency_unavailable"
+                                    && http["trace_id"].is_string()
+                                    && page["trace_id"] == http["trace_id"]
+                                    && page["producer.sequence"].as_u64()
+                                        > http["producer.sequence"].as_u64()
+                            })
+                        })
+                } else {
+                    logs.windows(event.len()).any(|value| value == event)
+                };
+                if observed {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .expect("real elected catalog owner did not produce its provider refusal");
+    }
+    async fn stop(child: tokio::process::Child, signal: &str) -> Value {
+        let pid = child.id().unwrap();
+        assert!(
+            tokio::process::Command::new("/bin/kill")
+                .args([signal, &pid.to_string()])
+                .status()
+                .await
+                .unwrap()
+                .success()
+        );
+        let output = tokio::time::timeout(Duration::from_secs(30), child.wait_with_output())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "owned background CLI did not shut down gracefully"
+        );
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["stopped"], true);
+        value
+    }
+    let (owner, owner_log) = spawn("owner");
+    wait_for(&owner_log, b"gds.catalog.read.failed", secret).await;
+    let (follower, follower_log) = spawn("follower");
+    wait_for(&follower_log, b"agent.sync.started", secret).await;
+    // Let the follower execute at least one actual lease/replication batch.
+    wait_for(&follower_log, b"sync.replica.batch", secret).await;
+    assert!(
+        !std::fs::read(&follower_log)
+            .unwrap()
+            .windows(b"gds.catalog.read.failed".len())
+            .any(|v| v == b"gds.catalog.read.failed")
+    );
+    let stopped = stop(owner, "-TERM").await;
+    assert!(stopped["gds"]["error"].is_string());
+    // A separate process can now become owner, without logging out or changing keys.
+    wait_for(&follower_log, b"gds.catalog.read.failed", secret).await;
+    let stopped = stop(follower, "-INT").await;
+    assert!(stopped["gds"]["error"].is_string());
+    // A retained resource cannot acquire a fresh local-use generation after its
+    // native owner has been permanently stopped. The caller itself stays valid.
+    let native = nddev_device_sync_vault::replication::native::NativeReplica::attach(
+        identity,
+        root.join("nddev-device-sync"),
+        Some(env!("CARGO_PKG_VERSION").into()),
+    )
+    .await
+    .unwrap();
+    let catalog = native
+        .catalog(nddev_device_sync_gds::catalog_runtime::CatalogRuntime::new)
+        .unwrap();
+    let foreground = catalog.foreground(identity.clone());
+    let refusal = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            match foreground.github_repository_page(false).await {
+                Err(nddev_device_sync_gds::catalog_runtime::view::GithubCatalogError::Busy) => {
+                    tokio::time::sleep(Duration::from_millis(100)).await
+                }
+                value => break value,
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(matches!(
+        refusal,
+        Err(nddev_device_sync_gds::catalog_runtime::view::GithubCatalogError::Unavailable)
+    ));
+    assert!(catalog.observation().await.unwrap().error.is_some());
+    let setting = vault.module_configuration("gds").await.unwrap();
+    vault
+        .set_module_configuration(
+            "gds".into(),
+            setting.revision,
+            setting.pending_id,
+            Configuration {
+                enabled: false,
+                permissions: setting.configuration.permissions,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        catalog.observation().await.is_none(),
+        "new consent must not inherit the previous probe"
+    );
+    native.stop().await.unwrap();
+    let settled = vault.synchronize().await.unwrap();
+    assert!(!settled.catching_up && settled.pending == 0 && settled.sync_error.is_empty());
+    assert!(matches!(
+        foreground.saved_github_repository_page(false).await,
+        Err(
+            nddev_device_sync_gds::catalog_runtime::view::GithubCatalogError::AuthorizationRequired
+        )
+    ));
+    let replacement = catalog.foreground(identity.clone());
+    assert!(matches!(
+        replacement.github_repository_page(false).await,
+        Err(
+            nddev_device_sync_gds::catalog_runtime::view::GithubCatalogError::AuthorizationRequired
+        )
+    ));
+    let raced = nddev_device_sync_vault::replication::native::NativeReplica::attach(
+        identity,
+        root.join("nddev-device-sync"),
+        Some(env!("CARGO_PKG_VERSION").into()),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        raced.catalog(|owner, vault| {
+            owner.cancel();
+            nddev_device_sync_gds::catalog_runtime::CatalogRuntime::new(owner, vault)
+        }),
+        Err(nddev_device_sync_vault::Error::Locked)
+    ));
+    raced.stop().await.unwrap();
+    nddev_device_sync_vault::replication::native::NativeReplica::shutdown()
+        .await
+        .unwrap();
+    identity.authorize_local().await.unwrap();
+    let current = vault.refresh_local().await.unwrap();
+    assert!(current.pending == 0 && current.sync_error.is_empty());
+    for log in [owner_log, follower_log] {
+        let logs = std::fs::read(&log).unwrap();
+        assert!(
+            !logs
+                .windows(secret.len())
+                .any(|value| value == secret.as_bytes())
+        );
+        if let Ok(prefix) = std::env::var("NDS_TEST_CLI_EVIDENCE_FILE") {
+            let evidence =
+                std::path::PathBuf::from(prefix).with_extension(log.file_name().unwrap());
+            std::fs::write(evidence, logs).unwrap();
+        }
+    }
+}
+
 #[tokio::test]
 #[ignore = "requires an owned --fixture-sync3 fixture and official GitHub CLI; optional isolated test credential"]
 async fn actual_native_vault_reference_drives_official_github_cli() {
@@ -350,6 +564,9 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
     .await;
     assert!(!success);
     assert_eq!(refused["error"], "vault_selection_changed");
+    if positive.is_none() {
+        background_handoff(endpoint, root.path(), &secret, &vault, &identity).await;
+    }
     let (success, cleared) = actual_cli(
         endpoint,
         &["github", "source", "clear"],
