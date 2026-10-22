@@ -40,6 +40,18 @@ durable local queue receipt. Other replicas receive the choice through ordinary
 NDS synchronization; selecting it grants neither device permissions nor GitHub
 access. Conflicted settings remain blocked.
 
+`github repositories` lists bounded saved metadata without polling GitHub.
+`github write enable` explicitly enables this device's GDS and its required
+read/credential/network and `git_write` permissions; `github write disable`
+withdraws only Git write consent and preserves existing files/settings.
+`github connect <repository_id> <owner_id> <owner> <repository>` uses that grant
+to connect the canonical `Developer/nddev/<owner>/<repository>` checkout on
+Linux/macOS. IDs and locator are confirmed against GitHub before local work and
+at publication. Existing dirty work and origins remain intact; occupied paths
+and mismatched identities are reported as blocked. A connection result is not
+proof of subsequent commit synchronization. This command installs no daemon and
+does not activate periodic Git writes; registered intent uses ordinary NDS sync.
+
 `sync run` keeps the existing Rust replica owner alive until Ctrl-C or a native
 termination signal. It resumes queued NDS synchronization and the permitted GDS
 catalog without a GUI. Another process observing the same local account follows

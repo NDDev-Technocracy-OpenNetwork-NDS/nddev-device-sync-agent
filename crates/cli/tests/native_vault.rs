@@ -571,6 +571,81 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
     assert_eq!(refused["error"], "vault_selection_changed");
     if positive.is_none() {
         background_handoff(endpoint, root.as_path(), &secret, &vault, &identity).await;
+        let (success, grant) = actual_cli(
+            endpoint,
+            &["github", "write", "enable"],
+            root.as_path(),
+            &secret,
+            "workspace-grant",
+        )
+        .await;
+        assert!(success && grant["queued"] == true);
+        assert!(
+            grant["permissions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == "git_write")
+        );
+        let (success, cached) = actual_cli(
+            endpoint,
+            &["github", "repositories"],
+            root.as_path(),
+            &secret,
+            "workspace-catalog",
+        )
+        .await;
+        assert!(success && cached["cached"] == true);
+        let (success, denied) = actual_cli(
+            endpoint,
+            &[
+                "github",
+                "connect",
+                "19",
+                "7",
+                "generated-company",
+                "generated-repository",
+            ],
+            root.as_path(),
+            &secret,
+            "workspace-provider-denied",
+        )
+        .await;
+        assert!(!success);
+        assert_eq!(denied["error"], "gds_unavailable");
+        let (success, withdrawn) = actual_cli(
+            endpoint,
+            &["github", "write", "disable"],
+            root.as_path(),
+            &secret,
+            "workspace-withdraw",
+        )
+        .await;
+        assert!(success && withdrawn["enabled"] == false);
+        assert!(
+            !withdrawn["permissions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == "git_write")
+        );
+        let (success, denied) = actual_cli(
+            endpoint,
+            &[
+                "github",
+                "connect",
+                "19",
+                "7",
+                "generated-company",
+                "generated-repository",
+            ],
+            root.as_path(),
+            &secret,
+            "workspace-consent-denied",
+        )
+        .await;
+        assert!(!success);
+        assert_eq!(denied["error"], "module_permission_required");
     }
     let (success, cleared) = actual_cli(
         endpoint,
