@@ -16,6 +16,26 @@ struct CommandReply {
     value: Value,
     durable: bool,
 }
+fn catalog_error(
+    error: nddev_device_sync_gds::catalog_runtime::view::GithubCatalogError,
+) -> &'static str {
+    use nddev_device_sync_gds::catalog_runtime::view::GithubCatalogError as E;
+    match error {
+        E::InvalidInput => "invalid_arguments",
+        E::AuthorizationRequired => "sign_in_required",
+        E::CredentialChanged => "gds_source_changed",
+        E::Busy => "gds_busy",
+        E::Cancelled => "gds_cancelled",
+        E::Timeout => "gds_timeout",
+        E::Unavailable => "gds_unavailable",
+        E::ProviderFailed => "gds_provider_failed",
+        E::InvalidResponse => "gds_invalid_response",
+        E::CapacityExhausted => "sync_capacity_exhausted",
+        E::ModuleDisabled => "module_disabled",
+        E::ModulePermissionRequired => "module_permission_required",
+        E::ModuleConfigurationConflict => "module_configuration_conflict",
+    }
+}
 impl From<Value> for CommandReply {
     fn from(value: Value) -> Self {
         Self {
@@ -81,7 +101,9 @@ async fn operation(
     }
     if !matches!(
         (scope.as_str(), command.as_str()),
-        ("vault", "list" | "use") | ("github", "source") | ("sync", "run")
+        ("vault", "list" | "use")
+            | ("github", "source" | "write" | "connect" | "repositories")
+            | ("sync", "run")
     ) {
         return Err("unsupported_operation");
     }
@@ -109,6 +131,7 @@ async fn operation(
             .map_err(|_| "vault_unavailable")?,
     );
     let offline = view.offline_authorized;
+    let mut catalog_client = None;
     if !offline || (scope == "sync" && command == "run") {
         let replica = NativeReplica::attach(
             &identity,
@@ -180,7 +203,121 @@ async fn operation(
             .map_err(|_| "vault_unavailable")?;
         current?;
     }
+    if catalog_client.is_none()
+        && scope == "github"
+        && matches!(command.as_str(), "connect" | "repositories")
+    {
+        // Bounded point use starts no collector task, including cache listing.
+        // The same concrete Rust composition owns its original caller; the
+        // existing NativeReplica remains responsible for background sync only.
+        let catalog = nddev_device_sync_gds::catalog_runtime::CatalogRuntime::new(
+            identity.clone(),
+            vault.clone(),
+        );
+        catalog_client = Some(catalog.foreground(identity.clone()));
+    }
     match (scope.as_str(), command.as_str(), remaining) {
+        ("github", "write", [action]) if matches!(action.as_str(), "enable" | "disable") => {
+            use nddev_device_sync_domain::{
+                Permission, modules::control::Configuration,
+                repositories::workspace::write_permissions,
+            };
+            if !nddev_device_sync_gds::catalog_runtime::workspace_supported() {
+                return Err("unsupported_platform");
+            }
+            let setting = vault
+                .module_configuration("gds")
+                .await
+                .map_err(source_error)?;
+            if setting.conflicted {
+                return Err("module_configuration_conflict");
+            }
+            let mut permissions = setting.configuration.permissions;
+            let enabled = action == "enable" || setting.configuration.enabled;
+            if action == "enable" {
+                permissions.extend(write_permissions());
+            } else {
+                permissions.remove(&Permission::GitWrite);
+            }
+            let tags = permissions
+                .iter()
+                .map(serde_json::to_value)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| "invalid_arguments")?;
+            let receipt = vault
+                .set_module_configuration_attempt(
+                    "gds".into(),
+                    setting.revision,
+                    setting.pending_id,
+                    Configuration {
+                        enabled,
+                        permissions,
+                    },
+                )
+                .await
+                .map_err(source_error)?;
+            Ok(CommandReply {
+                value: json!({"operation":"github.write","enabled":action=="enable","permissions":tags,"queued":true,"operation_id":receipt.operation_id,"local_revision":receipt.local_revision.to_string(),"offline":offline}),
+                durable: true,
+            })
+        }
+        ("github", "connect", [repository_id, owner_id, owner, name]) => {
+            use nddev_device_sync_domain::repositories::{
+                catalog::{GithubAccountId, RepositoryId},
+                workspace::CheckoutLocation,
+            };
+            let parse = |value: &str| {
+                let number = value.parse::<u64>().map_err(|_| "invalid_arguments")?;
+                if number.to_string() != value {
+                    return Err("invalid_arguments");
+                }
+                Ok(number)
+            };
+            let location = CheckoutLocation::new(
+                RepositoryId::new(parse(repository_id)?).map_err(|_| "invalid_arguments")?,
+                GithubAccountId::new(parse(owner_id)?).map_err(|_| "invalid_arguments")?,
+                owner.clone(),
+                name.clone(),
+            )
+            .map_err(|_| "invalid_arguments")?;
+            let result = catalog_client
+                .as_ref()
+                .ok_or("online_verification_required")?
+                .connect_repository(location)
+                .await
+                .map_err(catalog_error)?;
+            let durable = matches!(
+                result.outcome.as_str(),
+                "connected" | "registration_pending"
+            );
+            Ok(CommandReply {
+                value: json!({"operation":"github.connect","outcome":result.outcome,"reason":result.reason,"relative_path":result.relative_path,"intent_queued":result.intent_queued}),
+                durable,
+            })
+        }
+        ("github", "repositories", []) => {
+            let client = catalog_client
+                .as_ref()
+                .ok_or("online_verification_required")?;
+            let mut repositories = Vec::new();
+            let mut next = false;
+            for _ in 0..=(nddev_device_sync_domain::sync::MAX_ENTITY_COUNT / 25) {
+                let page = client
+                    .saved_github_repository_page(next)
+                    .await
+                    .map_err(catalog_error)?;
+                for group in page.groups {
+                    for item in group.repositories {
+                        repositories.push(json!({"id":item.repository.id,"owner_id":group.owner_id,"owner":group.owner.as_ref().map(|value|value.owner.login.as_str()),"name":item.repository.name,"conflicted":item.observation.conflicted,"pending":item.observation.pending,"observed_at_ms":item.observation.observed_at_ms}));
+                    }
+                }
+                if !page.has_more {
+                    return Ok(json!({"operation":"github.repositories","cached":true,"repositories":repositories}).into());
+                }
+                next = true;
+            }
+            Err("gds_capacity_exhausted")
+        }
         ("github", "source", []) => {
             let source = vault.github_source().await.map_err(source_error)?;
             Ok(json!({"operation":"github.source","offline":offline,
