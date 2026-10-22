@@ -431,8 +431,13 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
         serde_json::from_slice::<Value>(&capabilities.body).unwrap()["new_operation_version"],
         3
     );
-    let root = tempfile::tempdir().unwrap();
-    let vault = VaultClient::new(identity.clone(), root.path().join("nddev-device-sync"))
+    // The native cache slots and their durable fence must use one installation
+    // state home in every process, exactly as GUI and CLI do in production.
+    let root = std::path::PathBuf::from(std::env::var_os("XDG_STATE_HOME").unwrap());
+    assert!(
+        root.is_absolute() && root.starts_with(std::path::Path::new(&receipt).parent().unwrap())
+    );
+    let vault = VaultClient::new(identity.clone(), root.as_path().join("nddev-device-sync"))
         .await
         .unwrap();
     let initial = vault.synchronize().await.unwrap();
@@ -463,7 +468,7 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
         .await
         .unwrap();
     // Inspect only this fixture's durable encrypted replica, including WAL.
-    let files = std::fs::read_dir(root.path().join("nddev-device-sync/sync")).unwrap();
+    let files = std::fs::read_dir(root.as_path().join("nddev-device-sync/sync")).unwrap();
     let mut persisted = 0;
     for entry in files {
         let path = entry.unwrap().path();
@@ -494,7 +499,7 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
         let (success, page) = actual_cli(
             endpoint,
             &["vault", "list"],
-            root.path(),
+            root.as_path(),
             &secret,
             &format!("list-{index}"),
         )
@@ -519,7 +524,7 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
     let (success, absent) = actual_cli(
         endpoint,
         &["github", "source"],
-        root.path(),
+        root.as_path(),
         &secret,
         "source-absent",
     )
@@ -535,7 +540,7 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
     let (success, selected) = actual_cli(
         endpoint,
         &["github", "source", "select", &reference, &revision],
-        root.path(),
+        root.as_path(),
         &secret,
         "source-select",
     )
@@ -544,7 +549,7 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
     let (success, restored) = actual_cli(
         endpoint,
         &["github", "source"],
-        root.path(),
+        root.as_path(),
         &secret,
         "source-restored",
     )
@@ -557,7 +562,7 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
     let (success, refused) = actual_cli(
         endpoint,
         &["github", "source", "select", "absent-credential", "0"],
-        root.path(),
+        root.as_path(),
         &secret,
         "source-refused",
     )
@@ -565,12 +570,12 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
     assert!(!success);
     assert_eq!(refused["error"], "vault_selection_changed");
     if positive.is_none() {
-        background_handoff(endpoint, root.path(), &secret, &vault, &identity).await;
+        background_handoff(endpoint, root.as_path(), &secret, &vault, &identity).await;
     }
     let (success, cleared) = actual_cli(
         endpoint,
         &["github", "source", "clear"],
-        root.path(),
+        root.as_path(),
         &secret,
         "source-clear",
     )
@@ -579,7 +584,7 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
     let (success, empty) = actual_cli(
         endpoint,
         &["github", "source"],
-        root.path(),
+        root.as_path(),
         &secret,
         "source-cleared-reopen",
     )
@@ -603,7 +608,7 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
         Duration::from_secs(60),
         tokio::process::Command::new(command.executable)
             .args(command.arguments)
-            .env("XDG_STATE_HOME", root.path())
+            .env("XDG_STATE_HOME", root.as_path())
             .output(),
     )
     .await
