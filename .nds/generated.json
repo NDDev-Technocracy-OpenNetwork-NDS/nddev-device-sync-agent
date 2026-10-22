@@ -1,0 +1,17 @@
+{
+  "generator": {
+    "name": "nddev-std0001",
+    "version": "1.4.1"
+  },
+  "outputs": {
+    "CLAUDE.md": {
+      "inputs": [
+        "AGENTS.md"
+      ],
+      "mode": "100644",
+      "recipe": "adapter:claude/instructions",
+      "sha256": "02ad1de0883a1de1962e13d3e177de7eaea9db1667c7f5bdf315828f4e9edfb0"
+    }
+  },
+  "schema": "nddev.ledger/v1"
+}

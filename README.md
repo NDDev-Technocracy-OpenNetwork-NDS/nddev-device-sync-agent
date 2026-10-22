@@ -89,3 +89,5 @@ hash followed by execution through a path is not race-free attestation.
 Unpackaged Linux builds leave GDS unconfigured. macOS/Windows GDS refuses
 execution until its native resource boundary is qualified; other module support
 is unchanged. Provider acceptance runs only owned temporary copies and daemons.
+
+Release journals live in [GitHub Releases](https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-agent/releases).

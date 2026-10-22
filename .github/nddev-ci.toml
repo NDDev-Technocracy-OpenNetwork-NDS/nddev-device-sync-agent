@@ -1,0 +1,25 @@
+schema = 1
+profiles = ["rust"]
+
+[tools.rust]
+command = ["rustc", "--version"]
+pattern = "^rustc 1[.]99[.]1"
+
+[commands.rust]
+lint = ["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--jobs", "4", "--", "-D", "warnings"]
+test = ["cargo", "nextest", "run", "--locked", "--workspace", "--jobs", "4", "--profile", "ci"]
+doctest = ["cargo", "test", "--locked", "--workspace", "--doc", "--jobs", "4"]
+build = ["cargo", "build", "--locked", "--workspace", "--release", "--jobs", "4"]
+policy = ["cargo", "deny", "--locked", "check", "licenses", "sources"]
+
+[reports.rust]
+kind = "junit"
+path = ".nddev-reports/nextest/ci/junit.xml"
+
+[timeouts]
+rust = 900
+
+[extras.advisories]
+purpose = "Check the locked dependencies against current RustSec advisories"
+command = ["cargo", "audit", "--deny", "warnings"]
+timeout = 600
