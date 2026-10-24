@@ -471,9 +471,9 @@ checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
 name = "crypto-bigint"
-version = "0.7.5"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a52aa3fcda4e6302a9f48734f234d35d4721b96f8fe07d073f07ce9df4f0271"
+checksum = "6bb08299a6046833a879ace115697f12fd2bd6c8d3e93c909ffc9e0738e7cae0"
 dependencies = [
  "cpubits",
  "ctutils",
@@ -3036,7 +3036,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-gds"
 version = "0.0.1-alpha.7"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds?rev=a2aed72e6e06f37f83dd2b9724ba2591e7246627#a2aed72e6e06f37f83dd2b9724ba2591e7246627"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds?rev=def5b704854c84c3f620ee35e34351045a44a4c1#def5b704854c84c3f620ee35e34351045a44a4c1"
 dependencies = [
  "base64 0.23.1",
  "gix",
@@ -3136,7 +3136,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-vault"
 version = "0.0.1-alpha.12"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-vault?rev=a774b20604d623900960a6162fe834fe941976e0#a774b20604d623900960a6162fe834fe941976e0"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-vault?rev=40dc94875c39cab03997779d8731260c444cd98c#40dc94875c39cab03997779d8731260c444cd98c"
 dependencies = [
  "base16ct",
  "base64 0.23.1",
