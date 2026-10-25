@@ -3006,7 +3006,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-clipboard"
 version = "0.0.1-alpha.7"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-clipboard?rev=0c05821816442f918549892e1adf586c207e59bc#0c05821816442f918549892e1adf586c207e59bc"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-clipboard?rev=038797d405a0c49e1e16812c8328e8749f4597d9#038797d405a0c49e1e16812c8328e8749f4597d9"
 dependencies = [
  "arboard",
  "jni 0.21.1",
