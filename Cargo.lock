@@ -3036,7 +3036,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-gds"
 version = "0.0.1-alpha.7"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds?rev=b37434cdc199eeb607f3d36c79b1e25670a3c8d8#b37434cdc199eeb607f3d36c79b1e25670a3c8d8"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds?rev=96b343687f75eb83b830e56528d0773c597f6b1b#96b343687f75eb83b830e56528d0773c597f6b1b"
 dependencies = [
  "base64 0.23.1",
  "gix",
