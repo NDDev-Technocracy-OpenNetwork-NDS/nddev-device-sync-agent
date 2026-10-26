@@ -26,7 +26,18 @@ impl TimedSocket {
 
 impl Read for TimedSocket {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-        self.socket.set_read_timeout(Some(self.remaining()?))?;
+        if let Err(setup_error) = self.socket.set_read_timeout(Some(self.remaining()?)) {
+            // A closed peer can leave readable bytes even when timeout setup
+            // fails. This socket has no clones: probe once in nonblocking mode,
+            // then check restoring blocking mode before returning any bytes.
+            self.socket.set_nonblocking(true)?;
+            let result = self.remaining().and_then(|_| (&self.socket).read(buffer));
+            self.socket.set_nonblocking(false)?;
+            return match result {
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Err(setup_error),
+                result => result,
+            };
+        }
         (&self.socket).read(buffer)
     }
 }

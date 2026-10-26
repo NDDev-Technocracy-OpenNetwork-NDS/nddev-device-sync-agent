@@ -1,6 +1,6 @@
 #![cfg(unix)]
 
-use nddev_device_sync_adapter_io::{CancellationToken, LocalChannel};
+use nddev_device_sync_adapter_io::{CancellationToken, IoError, LocalChannel};
 use std::{
     io::{Read, Write},
     os::unix::net::{UnixListener, UnixStream},
@@ -74,4 +74,57 @@ fn a_payload_written_before_the_peer_closes_stays_readable() {
         payload.expect("LocalChannel buffered payload after peer close"),
         b"hello"
     );
+}
+
+fn closed_peer(
+    payload: &[u8],
+    timeout: Duration,
+    cancellation: CancellationToken,
+) -> (tempfile::TempDir, LocalChannel) {
+    let directory = tempfile::Builder::new()
+        .prefix("nds-io-peer-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let path = directory.path().join("s.sock");
+    let listener = UnixListener::bind(&path).unwrap();
+    let channel = LocalChannel::connect(&path, timeout, 65_536, cancellation).unwrap();
+    let (mut peer, _) = listener.accept().unwrap();
+    peer.set_write_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    peer.write_all(payload).unwrap();
+    drop(peer);
+    (directory, channel)
+}
+
+#[test]
+fn fully_closed_empty_peer_reports_eof_as_invalid_frame() {
+    let (_directory, mut channel) =
+        closed_peer(b"", Duration::from_secs(5), CancellationToken::new());
+    assert_eq!(channel.read_frame(), Err(IoError::InvalidFrame));
+}
+
+#[test]
+fn fully_closed_peer_cannot_complete_a_truncated_payload() {
+    let (_directory, mut channel) =
+        closed_peer(b"hel", Duration::from_secs(5), CancellationToken::new());
+    assert_eq!(channel.read_payload(5), Err(IoError::Transport));
+}
+
+#[test]
+fn cancellation_prevents_reading_a_closed_peers_buffered_payload() {
+    let cancellation = CancellationToken::new();
+    let (_directory, mut channel) =
+        closed_peer(b"hello", Duration::from_secs(5), cancellation.clone());
+    cancellation.cancel();
+    assert_eq!(channel.read_payload(5), Err(IoError::Cancelled));
+    assert_eq!(channel.read_frame(), Err(IoError::Cancelled));
+}
+
+#[test]
+fn expired_deadline_prevents_reading_a_closed_peers_buffered_payload() {
+    let timeout = Duration::from_millis(100);
+    let (_directory, mut channel) = closed_peer(b"hello", timeout, CancellationToken::new());
+    std::thread::sleep(timeout);
+    assert_eq!(channel.read_payload(5), Err(IoError::Timeout));
+    assert_eq!(channel.read_frame(), Err(IoError::Timeout));
 }
