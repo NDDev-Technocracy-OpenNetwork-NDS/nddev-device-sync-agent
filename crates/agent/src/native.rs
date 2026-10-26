@@ -14,7 +14,7 @@ use tracing::Instrument;
 
 use nddev_device_sync_cleaner::Cleaner;
 use nddev_device_sync_gds::Gds;
-use nddev_device_sync_rds::Rds;
+use nddev_device_sync_rds::{Rds, ReadRds};
 use nddev_device_sync_updater::Updater;
 
 struct ModuleSlot {
@@ -91,7 +91,7 @@ impl NativeAgent {
             executable("rds")
                 .map(|path| Rds::new(io.process_handle(), path, None))
                 .transpose()
-                .map_err(io_error)?
+                .map_err(rds_error)?
         } else {
             None
         };
@@ -348,14 +348,14 @@ impl NativeAgent {
 
     pub async fn remote_sessions(
         &self,
-    ) -> Result<nddev_device_sync_rds::RemoteSnapshot, AgentError> {
+    ) -> Result<nddev_device_sync_rds::view::RemoteSnapshot, AgentError> {
         self.observe("rds", |cancellation| async move {
             self.rds
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
                 .sessions(cancellation)
                 .await
-                .map_err(io_error)
+                .map_err(rds_error)
         })
         .await
     }
@@ -390,6 +390,14 @@ fn clipboard_error(error: nddev_device_sync_clipboard::Error) -> AgentError {
         nddev_device_sync_clipboard::Error::Io(error) => io_error(error),
         nddev_device_sync_clipboard::Error::Protocol => AgentError::InvalidResponse,
         nddev_device_sync_clipboard::Error::Provider => AgentError::ProviderFailed,
+    }
+}
+
+fn rds_error(error: nddev_device_sync_rds::Error) -> AgentError {
+    match error {
+        nddev_device_sync_rds::Error::Io(error) => io_error(error),
+        nddev_device_sync_rds::Error::Protocol => AgentError::InvalidResponse,
+        nddev_device_sync_rds::Error::UnsupportedPlatform => AgentError::UnsupportedPlatform,
     }
 }
 
