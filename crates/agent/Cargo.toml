@@ -22,7 +22,7 @@ nddev-device-sync-clipboard = { version = "=0.0.1-alpha.7", git = "https://githu
 nddev-device-sync-cleaner = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-cleaner", rev = "191613987e172ad23e806b050d570b30acac0260" }
 nddev-device-sync-updater = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-updater", rev = "f4946ef582e0d939147fad1d38d143f1f0c96ab0" }
 nddev-device-sync-gds = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds", rev = "fd1f0799795550fda201c593ba4614d01dca1945" }
-nddev-device-sync-rds = { version = "=0.0.1-alpha.2", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-rds", rev = "65e215798059f23fe583caae9151343f70e34773" }
+nddev-device-sync-rds = { version = "=0.0.1-alpha.2", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-rds", rev = "c45de872ac2eadc088070ca8cf752f8c96523d7a" }
 
 [dev-dependencies]
 tempfile = "3"

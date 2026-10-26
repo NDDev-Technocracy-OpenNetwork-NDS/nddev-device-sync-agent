@@ -3079,10 +3079,11 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-rds"
 version = "0.0.1-alpha.2"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-rds?rev=65e215798059f23fe583caae9151343f70e34773#65e215798059f23fe583caae9151343f70e34773"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-rds?rev=c45de872ac2eadc088070ca8cf752f8c96523d7a#c45de872ac2eadc088070ca8cf752f8c96523d7a"
 dependencies = [
  "nddev-device-sync-adapter-io",
  "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
