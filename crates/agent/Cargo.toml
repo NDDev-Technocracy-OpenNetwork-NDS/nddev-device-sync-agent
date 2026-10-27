@@ -17,7 +17,7 @@ tracing = "0.1"
 [dependencies]
 serde_json = "1"
 nddev-device-sync-cache-client = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-cache", rev = "b69af6bf32d3c4dd87cd0fd4e40212125d59d376" }
-nddev-device-sync-browser-use = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-browser-use", rev = "1abc773f3bd41411fb94b5decca78e92bdfaf993" }
+nddev-device-sync-browser-use = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-browser-use", rev = "b7b861dbbb2e2d05e12211f3784c7ebc77dd02a3" }
 nddev-device-sync-domain = { version = "=0.0.12", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-core.git", rev = "238dcec49849712758b6559facce70c2d226b42c" }
 nddev-device-sync-sysinfo = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-sysinfo", rev = "36dc38f1841b517b554083ff9157bddd2d27cf08" }
 nddev-device-sync-clipboard = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-clipboard", rev = "45021ed6340875f1cc94f766c23a88c73daf32f7" }

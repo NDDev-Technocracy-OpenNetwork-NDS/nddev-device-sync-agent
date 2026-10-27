@@ -3117,7 +3117,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-browser-use"
 version = "0.0.1-alpha.1"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-browser-use?rev=1abc773f3bd41411fb94b5decca78e92bdfaf993#1abc773f3bd41411fb94b5decca78e92bdfaf993"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-browser-use?rev=b7b861dbbb2e2d05e12211f3784c7ebc77dd02a3#b7b861dbbb2e2d05e12211f3784c7ebc77dd02a3"
 dependencies = [
  "async-io",
  "futures-io",
