@@ -24,6 +24,7 @@ pub fn module_graph() -> Result<nddev_device_sync_domain::ModuleGraph, view::Age
         nddev_device_sync_updater::MANIFEST,
         nddev_device_sync_gds::MANIFEST,
         nddev_device_sync_rds::MANIFEST,
+        nddev_device_sync_browser_use::MANIFEST,
     ] {
         graph
             .register(
@@ -35,4 +36,25 @@ pub fn module_graph() -> Result<nddev_device_sync_domain::ModuleGraph, view::Age
         .validate()
         .map_err(|_| view::AgentError::InvalidContract)?;
     Ok(graph)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn graph_registers_the_owning_browser_descriptor_as_seventh_module() {
+        let graph = super::module_graph().unwrap();
+        assert_eq!(graph.iter().count(), 7);
+        let descriptor = graph
+            .iter()
+            .find(|module| module.id.as_str() == "browser-use")
+            .unwrap();
+        let owner: serde_json::Value =
+            serde_json::from_str(nddev_device_sync_browser_use::MANIFEST).unwrap();
+        assert_eq!(descriptor.version, owner["version"].as_str().unwrap());
+        assert_eq!(
+            owner["capabilities"],
+            serde_json::json!(["control_browser"])
+        );
+        assert_eq!(owner["permissions"], serde_json::json!(["browser_control"]));
+    }
 }
