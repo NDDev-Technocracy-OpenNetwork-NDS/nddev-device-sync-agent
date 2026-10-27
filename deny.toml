@@ -13,6 +13,7 @@ wildcards = "deny"
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-git = [
+    "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-browser-use",
     "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-accounts",
     "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-vault",
     "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-protocol.git",
