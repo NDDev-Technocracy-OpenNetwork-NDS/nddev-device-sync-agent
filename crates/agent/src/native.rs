@@ -32,6 +32,114 @@ struct ModuleSlot {
     lifetime: Arc<CancellationToken>,
 }
 
+#[cfg(target_os = "linux")]
+#[derive(Default, PartialEq, Eq)]
+enum CacheMutationState {
+    #[default]
+    Idle,
+    Running,
+    Unknown,
+    PublishingStatus,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Default)]
+struct CacheMutationSlot {
+    state: CacheMutationState,
+    generation: Arc<()>,
+}
+
+/// An admitted mutation must be retained and joined by its composition owner.
+/// Dropping LocalIo's future does not join its blocking worker: never reopen
+/// this slot merely because an awaiter disappeared or a lifetime was revoked.
+#[cfg(target_os = "linux")]
+struct CacheMutation<'a> {
+    slot: &'a Mutex<CacheMutationSlot>,
+    completed: bool,
+}
+
+#[cfg(target_os = "linux")]
+impl<'a> CacheMutation<'a> {
+    fn begin(slot: &'a Mutex<CacheMutationSlot>) -> Result<Self, AgentError> {
+        let mut state = slot.lock().unwrap_or_else(|error| error.into_inner());
+        if state.state != CacheMutationState::Idle {
+            return Err(AgentError::Busy);
+        }
+        state.generation = Arc::new(());
+        state.state = CacheMutationState::Running;
+        Ok(Self {
+            slot,
+            completed: false,
+        })
+    }
+
+    fn finish(mut self, result: &Result<cache::Status, CacheError>) {
+        // The concrete cache client's LocalIo maps a blocking worker JoinError
+        // to Transport. Its effect is unresolved, unlike a returned Uncertain:
+        // that is a known completed owner result saying files may have changed.
+        self.slot
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .state = if matches!(result, Err(CacheError::Io(IoError::Transport))) {
+            CacheMutationState::Unknown
+        } else {
+            CacheMutationState::Idle
+        };
+        self.completed = true;
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for CacheMutation<'_> {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.slot
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .state = CacheMutationState::Unknown;
+        }
+    }
+}
+
+/// The generation fences the complete local status I/O interval. A short
+/// logical lease after I/O also closes the check -> observer/publication race;
+/// no std MutexGuard crosses an await. This is not an external-process lock.
+#[cfg(target_os = "linux")]
+struct CacheStatusPublication<'a> {
+    slot: &'a Mutex<CacheMutationSlot>,
+    generation: Arc<()>,
+}
+
+#[cfg(target_os = "linux")]
+impl<'a> CacheStatusPublication<'a> {
+    fn begin(slot: &'a Mutex<CacheMutationSlot>, generation: Arc<()>) -> Result<Self, CacheError> {
+        let mut state = slot.lock().unwrap_or_else(|error| error.into_inner());
+        if state.state != CacheMutationState::Idle || !Arc::ptr_eq(&state.generation, &generation) {
+            return Err(CacheError::Busy);
+        }
+        state.state = CacheMutationState::PublishingStatus;
+        Ok(Self { slot, generation })
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for CacheStatusPublication<'_> {
+    fn drop(&mut self) {
+        let mut state = self.slot.lock().unwrap_or_else(|error| error.into_inner());
+        if state.state == CacheMutationState::PublishingStatus
+            && Arc::ptr_eq(&state.generation, &self.generation)
+        {
+            state.state = CacheMutationState::Idle;
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+struct CacheRead<'a> {
+    result: Result<cache::Status, CacheError>,
+    _publication: CacheStatusPublication<'a>,
+}
+
 // Private local ownership only: never a UI DTO, synced configuration or log field.
 #[derive(Default)]
 struct BrowserRegistry {
@@ -261,6 +369,8 @@ pub struct NativeAgent {
     browser_registry: Mutex<BrowserRegistry>,
     #[cfg(target_os = "linux")]
     cache: Option<CacheClient>,
+    #[cfg(target_os = "linux")]
+    cache_mutation: Mutex<CacheMutationSlot>,
 }
 
 impl Drop for NativeAgent {
@@ -395,6 +505,8 @@ impl NativeAgent {
             }),
             #[cfg(target_os = "linux")]
             cache,
+            #[cfg(target_os = "linux")]
+            cache_mutation: Mutex::default(),
         })
     }
 
@@ -411,28 +523,147 @@ impl NativeAgent {
     /// content. Neither marker presence nor HTTP 200 authenticates an RDS route
     /// or proves that the content names this port. This never binds/unbinds.
     pub async fn cache_status(&self) -> Result<cache::Status, CacheError> {
-        self.observe_mapped(
-            "cache",
-            |cancellation| async move {
-                #[cfg(target_os = "linux")]
-                {
-                    self.cache
-                        .as_ref()
-                        .ok_or(CacheError::Io(IoError::Unavailable))?
-                        .status(cancellation)
-                        .await
+        #[cfg(target_os = "linux")]
+        {
+            self.observe_mapped(
+                "cache",
+                |cancellation| async move {
+                    let generation = {
+                        let slot = self
+                            .cache_mutation
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
+                        if slot.state != CacheMutationState::Idle {
+                            return Err(CacheError::Busy);
+                        }
+                        slot.generation.clone()
+                    };
+                    let result = match &self.cache {
+                        Some(cache) => cache.status(cancellation).await,
+                        None => Err(CacheError::Io(IoError::Unavailable)),
+                    };
+                    // Retain the lease for BOTH provider success and refusal,
+                    // through the unchanged observer and final result handoff.
+                    let publication =
+                        CacheStatusPublication::begin(&self.cache_mutation, generation)?;
+                    Ok(CacheRead {
+                        result,
+                        _publication: publication,
+                    })
+                },
+                cache_gate_error,
+                cache_observation,
+                |read| match &read.result {
+                    Ok(status) => cache_success(status),
+                    Err(error) => Err(cache_observation(error)),
+                },
+            )
+            .await?
+            .result
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            self.observe_mapped(
+                "cache",
+                |_| async { Err(CacheError::UnsupportedPlatform) },
+                cache_gate_error,
+                cache_observation,
+                cache_success,
+            )
+            .await
+        }
+    }
+
+    /// Explicitly bind this user's tools to the supplied cache base. Once
+    /// admitted, retain/join this future even after revocation or caller loss.
+    /// A later cancellation observation cannot mean that no files changed.
+    pub async fn cache_bind(&self) -> Result<cache::Status, CacheError> {
+        self.mutate_cache(true).await
+    }
+
+    /// Explicitly remove only the owning client's managed bindings. Shutdown,
+    /// logout and revoke never call this or imply that direct mode was restored.
+    pub async fn cache_unbind(&self) -> Result<cache::Status, CacheError> {
+        self.mutate_cache(false).await
+    }
+
+    async fn mutate_cache(&self, bind: bool) -> Result<cache::Status, CacheError> {
+        #[cfg(target_os = "linux")]
+        {
+            self.cache_mutation_with(|cancellation| async move {
+                let cache = self
+                    .cache
+                    .as_ref()
+                    .ok_or(CacheError::Io(IoError::Unavailable))?;
+                if bind {
+                    cache.bind(cancellation).await
+                } else {
+                    cache.unbind(cancellation).await
                 }
-                #[cfg(not(target_os = "linux"))]
-                {
-                    let _ = cancellation;
-                    Err(CacheError::UnsupportedPlatform)
-                }
-            },
-            cache_gate_error,
-            cache_observation,
-            cache_success,
-        )
-        .await
+            })
+            .await
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = bind;
+            self.observe_mapped(
+                "cache",
+                |_| async { Err(CacheError::UnsupportedPlatform) },
+                cache_gate_error,
+                cache_observation,
+                cache_success,
+            )
+            .await
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn cache_mutation_with<F>(
+        &self,
+        work: impl FnOnce(CancellationToken) -> F,
+    ) -> Result<cache::Status, CacheError>
+    where
+        F: Future<Output = Result<cache::Status, CacheError>>,
+    {
+        // A result cell, not a second observer: the unchanged query kernel owns
+        // admission/observation/telemetry, including its post-cancel masking.
+        // Keep the exact non-Clone provider result before that masking occurs.
+        let effect = Mutex::new(None);
+        let completed = &effect;
+        let observation = self
+            .observe_mapped(
+                "cache",
+                |lifetime| async move {
+                    let call = CacheMutation::begin(&self.cache_mutation)?;
+                    if self.cancellation.is_cancelled() || lifetime.is_cancelled() {
+                        call.finish(&Err(CacheError::Io(IoError::Cancelled)));
+                        return Err(AgentError::Cancelled);
+                    }
+                    // Fresh only AFTER admission. The owner must retain/join
+                    // the call; this token is not a dropped-task recovery tool.
+                    let result = work(CancellationToken::new()).await;
+                    let observed = match &result {
+                        Ok(status) => cache_success(status),
+                        Err(error) => Err(cache_observation(error)),
+                    };
+                    call.finish(&result);
+                    *completed.lock().unwrap_or_else(|error| error.into_inner()) = Some(result);
+                    observed
+                },
+                |error| error,
+                |error| *error,
+                |_| Ok(()),
+            )
+            .await;
+        let effect = effect
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+        effect.unwrap_or_else(|| {
+            Err(cache_gate_error(
+                observation.err().unwrap_or(AgentError::InvalidResponse),
+            ))
+        })
     }
 
     /// Deny new browser calls and cancel only this module. This is intent, not
@@ -1448,6 +1679,343 @@ mod tests {
                 }
             }
         }
+
+        /// Three real readiness exchanges: bind preflight/readback, then an
+        /// explicit unbind readback. The first reply is held; every thread and
+        /// socket has a finite bound, and Drop always releases/stops/joins it.
+        struct MutationProbe {
+            base: CacheBase,
+            first: CancellationToken,
+            release: Option<std::sync::mpsc::Sender<()>>,
+            stop: Arc<AtomicBool>,
+            task: Option<std::thread::JoinHandle<()>>,
+        }
+        impl MutationProbe {
+            fn new() -> Self {
+                let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+                listener.set_nonblocking(true).unwrap();
+                let base = CacheBase::new(listener.local_addr().unwrap().port()).unwrap();
+                let first = CancellationToken::new();
+                let observed = first.clone();
+                let stop = Arc::new(AtomicBool::new(false));
+                let stopping = stop.clone();
+                let (release, released) = std::sync::mpsc::channel();
+                let task = std::thread::spawn(move || {
+                    let deadline = Instant::now() + WAIT;
+                    let mut accepted = 0;
+                    while !stopping.load(Ordering::Acquire)
+                        && Instant::now() < deadline
+                        && accepted < 3
+                    {
+                        match listener.accept() {
+                            Ok((mut stream, _)) => {
+                                stream.set_read_timeout(Some(WAIT)).unwrap();
+                                stream.set_write_timeout(Some(WAIT)).unwrap();
+                                let mut request = Vec::new();
+                                {
+                                    let mut input = BufReader::new(&mut stream).take(512);
+                                    while !request.ends_with(b"\r\n\r\n") {
+                                        let mut byte = [0; 1];
+                                        input.read_exact(&mut byte).unwrap();
+                                        request.push(byte[0]);
+                                    }
+                                }
+                                assert!(request.starts_with(b"GET /v1/ready HTTP/1.1\r\n"));
+                                if accepted == 0 {
+                                    observed.cancel();
+                                    if released.recv_timeout(WAIT).is_err() {
+                                        return;
+                                    }
+                                }
+                                stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+                                accepted += 1;
+                            }
+                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                                std::thread::sleep(Duration::from_millis(1));
+                            }
+                            Err(error) => panic!("private mutation peer: {:?}", error.kind()),
+                        }
+                    }
+                });
+                Self {
+                    base,
+                    first,
+                    release: Some(release),
+                    stop,
+                    task: Some(task),
+                }
+            }
+            fn release(&mut self) {
+                if let Some(release) = self.release.take() {
+                    let _ = release.send(());
+                }
+            }
+        }
+        impl Drop for MutationProbe {
+            fn drop(&mut self) {
+                self.release();
+                self.stop.store(true, Ordering::Release);
+                if let Some(task) = self.task.take() {
+                    let result = task.join();
+                    if !std::thread::panicking() {
+                        result.expect("private mutation peer");
+                    }
+                }
+            }
+        }
+
+        #[tokio::test]
+        async fn admitted_bind_survives_revocation_then_explicit_unbind_preserves_foreign_files() {
+            let root = tempfile::tempdir().unwrap();
+            std::fs::write(root.path().join("foreign.bin"), b"foreign\0unchanged").unwrap();
+            let before = files(root.path());
+            let mut peer = MutationProbe::new();
+            let client = CacheClient::new(
+                NativeIo::new(1).unwrap().local_handle(),
+                lane(root.path()),
+                peer.base.clone(),
+            );
+            let agent = Arc::new(agent(Some(client)));
+            let owned = agent.clone();
+            let bind = tokio::spawn(async move { owned.cache_bind().await });
+            let held = tokio::time::timeout(WAIT, peer.first.cancelled()).await;
+            // Retain every result until the held worker has been released and
+            // its actual async owner joined, including on an assertion failure.
+            let status = agent.cache_status().await;
+            let competing = agent.cache_unbind().await;
+            let revoked = agent.invalidate_module("cache");
+            let replacement = agent.cache_bind().await;
+            peer.release();
+            let bound = bind.await;
+            assert!(held.is_ok());
+            assert_eq!(status, Err(CacheError::Busy));
+            assert_eq!(competing, Err(CacheError::Busy));
+            assert_eq!(revoked, Ok(()));
+            assert_eq!(replacement, Err(CacheError::Busy));
+            let bound = bound.unwrap().unwrap();
+            assert!(bound.ready && bound.bindings.iter().any(|binding| binding.bound));
+            assert_ne!(files(root.path()), before, "revoke must not unbind");
+            let unbound = agent.cache_unbind().await.unwrap();
+            assert!(unbound.bindings.iter().all(|binding| !binding.bound));
+            assert_eq!(files(root.path()), before);
+        }
+
+        #[tokio::test]
+        async fn dropped_mutation_future_keeps_unknown_across_invalidation_and_close() {
+            let agent = browser_agent();
+            let browser_lifetime = agent
+                .modules
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|slot| slot.state.id == "browser-use")
+                .unwrap()
+                .lifetime
+                .clone();
+            // Exercise the actual admission/observer/drop seam without leaving
+            // an unjoinable OS worker in a test. Real LocalIo drop behavior is
+            // the reason this guard must retain Unknown, not a mock join proof.
+            let mut held = Box::pin(agent.cache_mutation_with(|worker| async move {
+                worker.cancelled().await;
+                Err(CacheError::Io(IoError::Cancelled))
+            }));
+            std::future::poll_fn(|cx| {
+                assert!(held.as_mut().poll(cx).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+            assert_eq!(agent.cache_status().await, Err(CacheError::Busy));
+            agent.invalidate_module("cache").unwrap();
+            std::future::poll_fn(|cx| {
+                assert!(held.as_mut().poll(cx).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+            drop(held);
+            assert!(!browser_lifetime.is_cancelled());
+            assert!(!agent.cancellation.is_cancelled());
+            assert_eq!(agent.cache_bind().await, Err(CacheError::Busy));
+            assert_eq!(agent.cache_unbind().await, Err(CacheError::Busy));
+            agent.invalidate_module("cache").unwrap();
+            assert_eq!(agent.cache_status().await, Err(CacheError::Busy));
+            agent.close();
+            assert!(matches!(
+                agent.cache_mutation.lock().unwrap().state,
+                CacheMutationState::Unknown
+            ));
+        }
+
+        #[tokio::test]
+        async fn joined_uncertain_preserves_written_effect_and_exact_error_after_cancellation() {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("owned-effect");
+            let owned = path.clone();
+            let agent = browser_agent();
+            let revoked = agent
+                .modules
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|slot| slot.state.id == "cache")
+                .unwrap()
+                .lifetime
+                .clone();
+            let io = NativeIo::new(1).unwrap().local_handle();
+            // A deterministic provider-result seam through REAL LocalIo; not
+            // a claim to reproduce the cache client's post-write read failure.
+            let result = agent
+                .cache_mutation_with(|worker| async move {
+                    io.local(worker, move |_| {
+                        std::fs::write(owned, b"effect remains").unwrap();
+                        revoked.cancel();
+                        Ok(Err::<cache::Status, CacheError>(CacheError::Uncertain))
+                    })
+                    .await?
+                })
+                .await;
+            assert_eq!(result, Err(CacheError::Uncertain));
+            assert_eq!(std::fs::read(path).unwrap(), b"effect remains");
+            assert!(matches!(
+                agent.cache_mutation.lock().unwrap().state,
+                CacheMutationState::Idle
+            ));
+        }
+
+        #[tokio::test]
+        async fn blocking_worker_panic_returns_transport_and_keeps_unknown() {
+            let agent = browser_agent();
+            let io = NativeIo::new(1).unwrap().local_handle();
+            let result = agent
+                .cache_mutation_with(|worker| async move {
+                    io.local(worker, |_| -> Result<cache::Status, IoError> {
+                        panic!("synthetic owned cache worker failure");
+                    })
+                    .await
+                    .map_err(CacheError::Io)
+                })
+                .await;
+            assert_eq!(result, Err(CacheError::Io(IoError::Transport)));
+            assert!(matches!(
+                agent.cache_mutation.lock().unwrap().state,
+                CacheMutationState::Unknown
+            ));
+            agent.invalidate_module("cache").unwrap();
+            assert_eq!(agent.cache_status().await, Err(CacheError::Busy));
+            assert_eq!(agent.cache_bind().await, Err(CacheError::Busy));
+        }
+
+        #[tokio::test]
+        async fn closed_admission_never_polls_mutation_work_or_poisons_an_idle_slot() {
+            let agent = browser_agent();
+            agent.close();
+            let result = agent
+                .cache_mutation_with(|_| async {
+                    panic!("denied mutation must not start");
+                })
+                .await;
+            assert_eq!(result, Err(CacheError::Io(IoError::Cancelled)));
+            assert!(matches!(
+                agent.cache_mutation.lock().unwrap().state,
+                CacheMutationState::Idle
+            ));
+        }
+
+        async fn status_crossed_by_owned_mutation(unknown: bool) {
+            let root = tempfile::tempdir().unwrap();
+            let mut peer = MutationProbe::new();
+            let io = NativeIo::new(2).unwrap();
+            let client = CacheClient::new(io.local_handle(), lane(root.path()), peer.base.clone());
+            let agent = Arc::new(agent(Some(client)));
+            let owned = agent.clone();
+            let status = tokio::spawn(async move { owned.cache_status().await });
+            let held = tokio::time::timeout(WAIT, peer.first.cancelled()).await;
+            let mutation = if unknown {
+                // The real status request is held. Admit then drop the actual
+                // mutation future seam without leaking an OS worker in a test.
+                let mut work = Box::pin(agent.cache_mutation_with(|_| {
+                    std::future::pending::<Result<cache::Status, CacheError>>()
+                }));
+                let pending = std::future::poll_fn(|cx| {
+                    // Record rather than assert until status is released/joined.
+                    std::task::Poll::Ready(work.as_mut().poll(cx).is_pending())
+                })
+                .await;
+                drop(work);
+                if pending {
+                    Ok(())
+                } else {
+                    Err(CacheError::Invalid)
+                }
+            } else {
+                let local = io.local_handle();
+                let changed = root.path().join("owned-completed-effect");
+                // A real, joined LocalIo effect with known Uncertain makes an
+                // honest ProviderFailed observation before the stale reply.
+                // This is a completion seam, not cache readback fault injection.
+                agent
+                    .cache_mutation_with(|worker| async move {
+                        local
+                            .local(worker, move |_| {
+                                std::fs::write(changed, b"known completed effect").unwrap();
+                                Ok(Err::<cache::Status, CacheError>(CacheError::Uncertain))
+                            })
+                            .await?
+                    })
+                    .await
+                    .map(|_| ())
+            };
+            peer.release();
+            let status = status.await;
+            assert!(held.is_ok());
+            assert_eq!(status.unwrap(), Err(CacheError::Busy));
+            let observation = agent
+                .modules()
+                .into_iter()
+                .find(|state| state.id == "cache")
+                .unwrap();
+            if unknown {
+                assert_eq!(mutation, Ok(()));
+                assert!(matches!(
+                    agent.cache_mutation.lock().unwrap().state,
+                    CacheMutationState::Unknown
+                ));
+                assert!(observation.reachability == Reachability::NotChecked);
+                assert!(observation.observed_at_ms.is_none());
+            } else {
+                assert_eq!(mutation, Err(CacheError::Uncertain));
+                assert!(matches!(
+                    agent.cache_mutation.lock().unwrap().state,
+                    CacheMutationState::Idle
+                ));
+                assert_eq!(observation.error, Some(AgentError::ProviderFailed));
+                assert!(observation.observed_at_ms.is_some());
+            }
+        }
+
+        #[tokio::test]
+        async fn held_real_status_cannot_publish_ready_after_mutation_becomes_unknown() {
+            status_crossed_by_owned_mutation(true).await;
+        }
+
+        #[tokio::test]
+        async fn held_real_status_cannot_erase_a_known_completed_mutation_observation() {
+            status_crossed_by_owned_mutation(false).await;
+        }
+
+        #[test]
+        fn status_publication_excludes_mutation_until_final_handoff() {
+            let slot = Mutex::<CacheMutationSlot>::default();
+            let generation = slot.lock().unwrap().generation.clone();
+            let publication = CacheStatusPublication::begin(&slot, generation.clone()).unwrap();
+            assert!(matches!(CacheMutation::begin(&slot), Err(AgentError::Busy)));
+            drop(publication);
+            let mutation = CacheMutation::begin(&slot).unwrap();
+            mutation.finish(&Err(CacheError::Uncertain));
+            assert!(matches!(
+                CacheStatusPublication::begin(&slot, generation),
+                Err(CacheError::Busy)
+            ));
+        }
     }
 
     fn browser_agent() -> NativeAgent {
@@ -1489,6 +2057,8 @@ mod tests {
             browser_registry: Mutex::default(),
             #[cfg(target_os = "linux")]
             cache: None,
+            #[cfg(target_os = "linux")]
+            cache_mutation: Mutex::default(),
         }
     }
 
