@@ -3141,7 +3141,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-cache-client"
 version = "0.0.1-alpha.1"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-cache?rev=1ee6d6d5caf0521628a3eac038b243d4f2af45b7#1ee6d6d5caf0521628a3eac038b243d4f2af45b7"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-cache?rev=b69af6bf32d3c4dd87cd0fd4e40212125d59d376#b69af6bf32d3c4dd87cd0fd4e40212125d59d376"
 dependencies = [
  "nddev-device-sync-adapter-io",
  "rustix",
@@ -3245,7 +3245,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-rds"
 version = "0.0.1-alpha.2"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-rds?rev=a5ab99d596c6b1142750eaa1a2bcdce4bce89ad9#a5ab99d596c6b1142750eaa1a2bcdce4bce89ad9"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-rds?rev=bed667ef0685ed4a650756286053ad82e691df8b#bed667ef0685ed4a650756286053ad82e691df8b"
 dependencies = [
  "nddev-device-sync-adapter-io",
  "serde",
