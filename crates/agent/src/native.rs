@@ -80,8 +80,12 @@ impl BrowserCall<'_> {
                 Ok(handle)
             }
             Err(error) => {
-                if matches!(&error, BrowserError::Refused(_)) {
-                    // Only an actual typed refusal proves that reserve was not granted.
+                if matches!(
+                    &error,
+                    BrowserError::Refused(_) | BrowserError::Io(IoError::Busy)
+                ) {
+                    // A typed host refusal or LocalIo's pre-worker admission
+                    // refusal proves that no reservation was granted.
                     registry.entries.remove(position);
                 } else {
                     registry.entries[position].needs_close = true;
@@ -1126,6 +1130,95 @@ mod tests {
             stream.write_all(b"\n").unwrap();
             stream.write_all(&payload).unwrap();
             stream.flush().unwrap();
+        }
+
+        #[tokio::test]
+        async fn local_admission_busy_sends_nothing_and_does_not_poison_the_next_reservation() {
+            let (agent, listener, root) = fixture();
+            let mut agent = Arc::try_unwrap(agent).ok().unwrap();
+            let local = NativeIo::new(1).unwrap().local_handle();
+            agent.browser = Some(
+                BrowserUseClient::new(local.clone(), root.path().join("browser.sock")).unwrap(),
+            );
+            let agent = Arc::new(agent);
+            let (entered, occupied) = tokio::sync::oneshot::channel();
+            let (release, held) = std::sync::mpsc::sync_channel(1);
+            let blocker = tokio::spawn(async move {
+                local
+                    .local(CancellationToken::new(), move |_| {
+                        entered.send(()).unwrap();
+                        held.recv_timeout(PEER_WAIT).map_err(|_| IoError::Timeout)?;
+                        Ok(())
+                    })
+                    .await
+            });
+            tokio::time::timeout(PEER_WAIT, occupied)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                agent.browser_open("owned").await.err(),
+                Some(IoError::Busy.into())
+            );
+            assert!(agent.browser_registry.lock().unwrap().entries.is_empty());
+            assert_eq!(
+                listener.accept().err().unwrap().kind(),
+                std::io::ErrorKind::WouldBlock
+            );
+            release.send(()).unwrap();
+            tokio::time::timeout(PEER_WAIT, blocker)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+
+            let owned = handle("owned", "after-local-admission");
+            let expected = owned.clone();
+            let (entered, received) = tokio::sync::oneshot::channel();
+            let (release, held) = std::sync::mpsc::sync_channel(1);
+            let peer = Peer::start(move || {
+                let (mut stream, call) = request(&listener);
+                assert!(matches!(call, Request::CreateOwned { project } if project == "owned"));
+                entered.send(()).unwrap();
+                held.recv_timeout(PEER_WAIT).unwrap();
+                reply(&mut stream, Reply::OwnedSession(expected.clone()));
+                drop(stream);
+                let (mut stream, call) = request(&listener);
+                assert!(
+                    matches!(call, Request::CloseOwned { session, close_tabs: false } if session == expected)
+                );
+                reply(&mut stream, Reply::Closed);
+            });
+            let opening = {
+                let agent = agent.clone();
+                tokio::spawn(async move { agent.browser_open("owned").await })
+            };
+            tokio::time::timeout(PEER_WAIT, received)
+                .await
+                .unwrap()
+                .unwrap();
+            agent.cancel_browser();
+            release.send(()).unwrap();
+            assert_eq!(
+                tokio::time::timeout(PEER_WAIT, opening)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .err(),
+                Some(IoError::Cancelled.into())
+            );
+            assert_eq!(
+                agent.browser_registry.lock().unwrap().entries[0]
+                    .handle
+                    .as_ref(),
+                Some(&owned)
+            );
+            tokio::time::timeout(PEER_WAIT, agent.drain_browser())
+                .await
+                .unwrap()
+                .unwrap();
+            peer.join();
+            assert!(agent.browser_registry.lock().unwrap().entries.is_empty());
         }
 
         #[tokio::test]
