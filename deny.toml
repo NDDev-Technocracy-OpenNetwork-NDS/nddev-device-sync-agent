@@ -31,3 +31,9 @@ allow-git = [
 name = "target-lexicon"
 version = "=0.13.5"
 allow = ["Apache-2.0 WITH LLVM-exception"]
+
+# cap-std support selected by the qualified Cleaner owner; exact crate only.
+[[licenses.exceptions]]
+name = "winx"
+version = "=0.36.4"
+allow = ["Apache-2.0 WITH LLVM-exception"]

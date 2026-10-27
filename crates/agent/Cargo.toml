@@ -8,7 +8,7 @@ homepage.workspace = true
 repository.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
-nddev-device-sync-adapter-io = { version = "=0.0.1-alpha.4", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-agent", rev = "a45a0d980d1e39260dfc7e6d6cbda55b02991d35" }
+nddev-device-sync-adapter-io = { version = "=0.0.1-alpha.4", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-agent", rev = "f0e21ef6cab88958479de142370179b779beb2fe" }
 nddev-device-sync-telemetry = { version = "=0.0.1-alpha.11", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-observability", rev = "32f21f8a8f9c313bee9dcd1769c042133b5520da" }
 sha2 = "0.11.1"
 base16ct = { version = "1.0", features = ["alloc"] }
@@ -17,12 +17,12 @@ tracing = "0.1"
 [dependencies]
 serde_json = "1"
 nddev-device-sync-domain = { version = "=0.0.12", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-core.git", rev = "aeb1361867e7180d6de50d18e9fe71fcc072a430" }
-nddev-device-sync-sysinfo = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-sysinfo", rev = "92cf2d9922d3753f65f2514ee1e79f8fff57293f" }
-nddev-device-sync-clipboard = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-clipboard", rev = "d8e7f36784e03477a1c30257e8caed9a54eb9dc5" }
-nddev-device-sync-cleaner = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-cleaner", rev = "191613987e172ad23e806b050d570b30acac0260" }
-nddev-device-sync-updater = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-updater", rev = "f4946ef582e0d939147fad1d38d143f1f0c96ab0" }
-nddev-device-sync-gds = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds", rev = "fd1f0799795550fda201c593ba4614d01dca1945" }
-nddev-device-sync-rds = { version = "=0.0.1-alpha.2", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-rds", rev = "c45de872ac2eadc088070ca8cf752f8c96523d7a" }
+nddev-device-sync-sysinfo = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-sysinfo", rev = "36dc38f1841b517b554083ff9157bddd2d27cf08" }
+nddev-device-sync-clipboard = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-clipboard", rev = "1c84940691af2fba426ba83e08d3621654a02805" }
+nddev-device-sync-cleaner = { version = "=0.0.1-alpha.2", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-cleaner", rev = "5b3f3e92d6ea7b18dfe2c2ab89f1828a0329339f" }
+nddev-device-sync-updater = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-updater", rev = "9503dbe004939dc3d3b4c23f452c9f87097896b7" }
+nddev-device-sync-gds = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds", rev = "1a9ba696c97c5b3316288095be238d2785d0e9e3" }
+nddev-device-sync-rds = { version = "=0.0.1-alpha.2", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-rds", rev = "708a593cc7841c4c87fdbdcc99d423f1b8876fa8" }
 
 [dev-dependencies]
 tempfile = "3"
