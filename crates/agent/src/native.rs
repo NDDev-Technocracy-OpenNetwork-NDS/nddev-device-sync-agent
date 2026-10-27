@@ -1442,7 +1442,7 @@ mod tests {
                 ) {
                     assert_eq!(state.error, before.error);
                     assert_eq!(state.observed_at_ms, before.observed_at_ms);
-                    assert_eq!(state.reachability, before.reachability);
+                    assert!(state.reachability == before.reachability);
                 } else {
                     assert_eq!(state.error, Some(expected));
                 }
