@@ -12,10 +12,10 @@ use std::{
 };
 use tracing::Instrument;
 
-use nddev_device_sync_cleaner::Cleaner;
+use nddev_device_sync_cleaner::{Cleaner, ReadCleaner};
 use nddev_device_sync_gds::Gds;
 use nddev_device_sync_rds::{Rds, ReadRds};
-use nddev_device_sync_updater::Updater;
+use nddev_device_sync_updater::{ReadUpdater, Updater};
 
 struct ModuleSlot {
     state: ModuleState,
@@ -62,7 +62,7 @@ impl NativeAgent {
             executable("rldyour-cleaner")
                 .map(|path| Cleaner::new(io.process_handle(), path))
                 .transpose()
-                .map_err(io_error)?
+                .map_err(cleaner_error)?
         } else {
             None
         };
@@ -70,7 +70,7 @@ impl NativeAgent {
             executable("rldyour-updater")
                 .map(|path| Updater::new(io.process_handle(), path))
                 .transpose()
-                .map_err(io_error)?
+                .map_err(updater_error)?
         } else {
             None
         };
@@ -264,68 +264,68 @@ impl NativeAgent {
 
     pub async fn cleaner_diagnostics(
         &self,
-    ) -> Result<nddev_device_sync_cleaner::Diagnostics, AgentError> {
+    ) -> Result<nddev_device_sync_cleaner::view::Diagnostics, AgentError> {
         self.observe("cleaner", |cancellation| async move {
             self.cleaner
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
                 .diagnose(cancellation)
                 .await
-                .map_err(io_error)
+                .map_err(cleaner_error)
         })
         .await
     }
 
     pub async fn cleaner_preview(
         &self,
-    ) -> Result<nddev_device_sync_cleaner::CleanerRunSummary, AgentError> {
+    ) -> Result<nddev_device_sync_cleaner::view::CleanerRunSummary, AgentError> {
         self.observe("cleaner", |cancellation| async move {
             self.cleaner
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
                 .preview(cancellation)
                 .await
-                .map_err(io_error)
+                .map_err(cleaner_error)
         })
         .await
     }
 
     pub async fn cleaner_last_run(
         &self,
-    ) -> Result<nddev_device_sync_cleaner::CleanerRunSummary, AgentError> {
+    ) -> Result<nddev_device_sync_cleaner::view::CleanerRunSummary, AgentError> {
         self.observe("cleaner", |cancellation| async move {
             self.cleaner
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
                 .last_run(cancellation)
                 .await
-                .map_err(io_error)
+                .map_err(cleaner_error)
         })
         .await
     }
 
-    pub async fn update_plan(&self) -> Result<nddev_device_sync_updater::Plan, AgentError> {
+    pub async fn update_plan(&self) -> Result<nddev_device_sync_updater::view::Plan, AgentError> {
         self.observe("updater", |cancellation| async move {
             self.updater
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
                 .plan(cancellation)
                 .await
-                .map_err(io_error)
+                .map_err(updater_error)
         })
         .await
     }
 
     pub async fn update_last_run(
         &self,
-    ) -> Result<nddev_device_sync_updater::UpdateRunSummary, AgentError> {
+    ) -> Result<nddev_device_sync_updater::view::UpdateRunSummary, AgentError> {
         self.observe("updater", |cancellation| async move {
             self.updater
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
                 .last_run(cancellation)
                 .await
-                .map_err(io_error)
+                .map_err(updater_error)
         })
         .await
     }
@@ -390,6 +390,22 @@ fn clipboard_error(error: nddev_device_sync_clipboard::Error) -> AgentError {
         nddev_device_sync_clipboard::Error::Io(error) => io_error(error),
         nddev_device_sync_clipboard::Error::Protocol => AgentError::InvalidResponse,
         nddev_device_sync_clipboard::Error::Provider => AgentError::ProviderFailed,
+    }
+}
+
+fn cleaner_error(error: nddev_device_sync_cleaner::Error) -> AgentError {
+    match error {
+        nddev_device_sync_cleaner::Error::Io(error) => io_error(error),
+        nddev_device_sync_cleaner::Error::Protocol => AgentError::InvalidResponse,
+        nddev_device_sync_cleaner::Error::UnsupportedPlatform => AgentError::UnsupportedPlatform,
+    }
+}
+
+fn updater_error(error: nddev_device_sync_updater::Error) -> AgentError {
+    match error {
+        nddev_device_sync_updater::Error::Io(error) => io_error(error),
+        nddev_device_sync_updater::Error::Protocol => AgentError::InvalidResponse,
+        nddev_device_sync_updater::Error::UnsupportedPlatform => AgentError::UnsupportedPlatform,
     }
 }
 
