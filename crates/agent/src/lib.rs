@@ -25,6 +25,7 @@ pub fn module_graph() -> Result<nddev_device_sync_domain::ModuleGraph, view::Age
         nddev_device_sync_gds::MANIFEST,
         nddev_device_sync_rds::MANIFEST,
         nddev_device_sync_browser_use::MANIFEST,
+        nddev_device_sync_cache_client::MANIFEST,
     ] {
         graph
             .register(
@@ -41,9 +42,9 @@ pub fn module_graph() -> Result<nddev_device_sync_domain::ModuleGraph, view::Age
 #[cfg(test)]
 mod tests {
     #[test]
-    fn graph_registers_the_owning_browser_descriptor_as_seventh_module() {
+    fn graph_keeps_the_owning_browser_descriptor_with_eight_modules() {
         let graph = super::module_graph().unwrap();
-        assert_eq!(graph.iter().count(), 7);
+        assert_eq!(graph.iter().count(), 8);
         let descriptor = graph
             .iter()
             .find(|module| module.id.as_str() == "browser-use")
@@ -56,5 +57,60 @@ mod tests {
             serde_json::json!(["control_browser"])
         );
         assert_eq!(owner["permissions"], serde_json::json!(["browser_control"]));
+    }
+
+    #[test]
+    fn graph_registers_the_owning_linux_cache_descriptor_without_extra_grants() {
+        use nddev_device_sync_domain::{
+            ModuleCapability, Permission, Platform, modules::control::Configuration,
+        };
+        use std::collections::BTreeSet;
+        let graph = super::module_graph().unwrap();
+        let descriptor = graph
+            .iter()
+            .find(|value| value.id.as_str() == "cache")
+            .unwrap();
+        let owner: serde_json::Value =
+            serde_json::from_str(nddev_device_sync_cache_client::MANIFEST).unwrap();
+        assert_eq!(descriptor.version, owner["version"].as_str().unwrap());
+        assert_eq!(descriptor.platforms, BTreeSet::from([Platform::Linux]));
+        assert_eq!(
+            owner["capabilities"],
+            serde_json::json!(["read_module_health", "manage_device_state"])
+        );
+        assert_eq!(
+            descriptor.capabilities,
+            BTreeSet::from([
+                ModuleCapability::ReadModuleHealth,
+                ModuleCapability::ManageDeviceState,
+            ])
+        );
+        assert_eq!(
+            descriptor.permissions,
+            BTreeSet::from([
+                Permission::LocalNetwork,
+                Permission::UserService,
+                Permission::ProcessExecution,
+            ])
+        );
+        assert_eq!(
+            owner["dependencies"],
+            serde_json::json!([{"id":"rds","minimum_api":1}])
+        );
+        let missing = Configuration {
+            enabled: true,
+            permissions: BTreeSet::from([Permission::ReadOnly]),
+        };
+        assert!(missing.admit(true, true, &descriptor.permissions).is_err());
+        let explicit = Configuration {
+            enabled: true,
+            permissions: descriptor.permissions.clone(),
+        };
+        assert!(explicit.admit(true, true, &descriptor.permissions).is_ok());
+        assert!(
+            explicit
+                .admit(false, true, &descriptor.permissions)
+                .is_err()
+        );
     }
 }
