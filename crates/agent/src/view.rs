@@ -4,6 +4,9 @@ pub use nddev_device_sync_domain::{
     state::Reachability,
 };
 
+pub use nddev_device_sync_browser_use::{
+    Error as BrowserError, protocol::Document as BrowserDocument, view as browser,
+};
 pub use nddev_device_sync_cleaner::view as cleaner;
 pub use nddev_device_sync_clipboard::view as clipboard;
 pub use nddev_device_sync_gds::view as gds;
