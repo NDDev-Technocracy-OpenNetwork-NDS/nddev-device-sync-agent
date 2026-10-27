@@ -550,7 +550,14 @@ impl NativeAgent {
                 BrowserRegistry::begin(&self.browser_registry, project, BrowserCallKind::Acquire)?;
             let handle = match handle {
                 Some(handle) => handle,
-                None => call.acquired(browser.create_owned(project, cancellation.clone()).await)?,
+                // Finish this already-admitted bounded reservation so revoke
+                // cannot discard its handle. The normal lifetime still gates
+                // every subsequent open/execute attempt below.
+                None => call.acquired(
+                    browser
+                        .create_owned(project, CancellationToken::new())
+                        .await,
+                )?,
             };
             // Retention precedes this check and the next await. Revocation while
             // reserve was completing must not open the returned reservation.
@@ -590,12 +597,18 @@ impl NativeAgent {
     }
 
     pub async fn browser_close(&self, project: &str, close_tabs: bool) -> Result<(), BrowserError> {
-        self.observe_browser(|cancellation| async move {
+        self.observe_browser(|_| async move {
             let browser = self.browser_port()?;
             let (call, handle) =
                 BrowserRegistry::begin(&self.browser_registry, project, BrowserCallKind::Close)?;
             let handle = handle.ok_or(BrowserError::InvalidResponse)?;
-            call.finish(browser.close_owned(&handle, close_tabs, cancellation).await)
+            // Retain the actual bounded cleanup ACK across normal revocation.
+            // The owning task must still be kept/joined; dropping it is unknown.
+            call.finish(
+                browser
+                    .close_owned(&handle, close_tabs, CancellationToken::new())
+                    .await,
+            )
         })
         .await
     }
@@ -1028,6 +1041,235 @@ mod tests {
         assert!(none.is_none());
         assert_eq!(call.acquired(Ok(handle.clone())).unwrap(), handle);
         call.finish(Ok(())).unwrap();
+    }
+
+    #[cfg(unix)]
+    mod browser_transport {
+        use super::*;
+        use nddev_device_sync_browser_use::protocol::{FRAME_LIMIT, Header, Reply, Request};
+        use std::{
+            io::{BufRead, BufReader, Read, Write},
+            os::unix::net::{UnixListener, UnixStream},
+        };
+
+        const PEER_WAIT: Duration = Duration::from_secs(5);
+
+        // Real private framed IPC, not a browser host/Chrome or permission fixture.
+        fn fixture() -> (Arc<NativeAgent>, UnixListener, tempfile::TempDir) {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("browser.sock");
+            let listener = UnixListener::bind(&path).unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let mut agent = browser_agent();
+            agent.browser = Some(
+                BrowserUseClient::new(NativeIo::new(1).unwrap().local_handle(), path).unwrap(),
+            );
+            (Arc::new(agent), listener, root)
+        }
+
+        struct Peer(Option<std::thread::JoinHandle<()>>);
+        impl Peer {
+            fn start(work: impl FnOnce() + Send + 'static) -> Self {
+                Self(Some(std::thread::spawn(work)))
+            }
+            fn join(mut self) {
+                self.0
+                    .take()
+                    .unwrap()
+                    .join()
+                    .expect("private IPC peer failed");
+            }
+        }
+        impl Drop for Peer {
+            fn drop(&mut self) {
+                // Accept/read/channel waits below are finite even if an assertion
+                // fails. Join before the owned socket directory is removed.
+                if let Some(peer) = self.0.take() {
+                    let _ = peer.join();
+                }
+            }
+        }
+
+        fn request(listener: &UnixListener) -> (UnixStream, Request) {
+            let deadline = Instant::now() + PEER_WAIT;
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < deadline, "private IPC accept timed out");
+                        // Only listener acceptance polls; held ACK ordering uses
+                        // explicit channels, not an assumed sleep duration.
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(_) => panic!("private IPC accept failed"),
+                }
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream.set_read_timeout(Some(PEER_WAIT)).unwrap();
+            stream.set_write_timeout(Some(PEER_WAIT)).unwrap();
+            let mut bytes = Vec::new();
+            {
+                let mut input = BufReader::new(&mut stream).take((FRAME_LIMIT + 1) as u64);
+                input.read_until(b'\n', &mut bytes).unwrap();
+            }
+            assert!(bytes.len() <= FRAME_LIMIT && bytes.last() == Some(&b'\n'));
+            (stream, serde_json::from_slice(&bytes).unwrap())
+        }
+
+        fn reply(stream: &mut UnixStream, value: Reply) {
+            let payload = serde_json::to_vec(&value).unwrap();
+            let header = serde_json::to_vec(&Header {
+                bytes: payload.len(),
+            })
+            .unwrap();
+            stream.write_all(&header).unwrap();
+            stream.write_all(b"\n").unwrap();
+            stream.write_all(&payload).unwrap();
+            stream.flush().unwrap();
+        }
+
+        #[tokio::test]
+        async fn held_reserve_ack_survives_module_cancel_and_retains_handle_without_open() {
+            let (agent, listener, _root) = fixture();
+            let owned = handle("owned", "bounded-reserve");
+            let (entered, observed) = tokio::sync::oneshot::channel();
+            let (release, held) = std::sync::mpsc::sync_channel(1);
+            let expected = owned.clone();
+            let peer = Peer::start(move || {
+                let (mut stream, call) = request(&listener);
+                assert!(matches!(call, Request::CreateOwned { project } if project == "owned"));
+                entered.send(()).unwrap();
+                held.recv_timeout(PEER_WAIT).unwrap();
+                reply(&mut stream, Reply::OwnedSession(expected.clone()));
+                drop(stream);
+                let (mut stream, call) = request(&listener);
+                // There must be no OpenOwned between late reserve and drain.
+                assert!(
+                    matches!(call, Request::CloseOwned { session, close_tabs: false } if session == expected)
+                );
+                reply(&mut stream, Reply::Closed);
+            });
+            let opened = {
+                let agent = agent.clone();
+                tokio::spawn(async move { agent.browser_open("owned").await })
+            };
+            tokio::time::timeout(PEER_WAIT, observed)
+                .await
+                .unwrap()
+                .unwrap();
+            agent.cancel_browser();
+            release.send(()).unwrap();
+            assert_eq!(
+                tokio::time::timeout(PEER_WAIT, opened)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .err(),
+                Some(IoError::Cancelled.into())
+            );
+            {
+                let registry = agent.browser_registry.lock().unwrap();
+                assert_eq!(registry.entries.len(), 1);
+                assert_eq!(registry.entries[0].handle.as_ref(), Some(&owned));
+                assert!(registry.denied && registry.entries[0].needs_close && registry.calls == 0);
+            }
+            tokio::time::timeout(PEER_WAIT, agent.drain_browser())
+                .await
+                .unwrap()
+                .unwrap();
+            peer.join();
+            let registry = agent.browser_registry.lock().unwrap();
+            assert!(registry.entries.is_empty() && registry.drained && registry.denied);
+        }
+
+        #[tokio::test]
+        async fn held_close_ack_survives_module_cancel_and_is_recorded_before_empty_drain() {
+            let (agent, listener, _root) = fixture();
+            let owned = handle("owned", "bounded-close");
+            retain(&agent.browser_registry, "owned", owned.clone());
+            let (entered, observed) = tokio::sync::oneshot::channel();
+            let (release, held) = std::sync::mpsc::sync_channel(1);
+            let peer = Peer::start(move || {
+                let (mut stream, call) = request(&listener);
+                assert!(
+                    matches!(call, Request::CloseOwned { session, close_tabs: false } if session == owned)
+                );
+                entered.send(()).unwrap();
+                held.recv_timeout(PEER_WAIT).unwrap();
+                reply(&mut stream, Reply::Closed);
+            });
+            let closed = {
+                let agent = agent.clone();
+                tokio::spawn(async move { agent.browser_close("owned", false).await })
+            };
+            tokio::time::timeout(PEER_WAIT, observed)
+                .await
+                .unwrap()
+                .unwrap();
+            agent.cancel_browser();
+            release.send(()).unwrap();
+            // Normal query authorization is canceled, but the exact cleanup ACK
+            // must already have removed the private owner handle.
+            assert_eq!(
+                tokio::time::timeout(PEER_WAIT, closed)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .err(),
+                Some(IoError::Cancelled.into())
+            );
+            peer.join();
+            assert!(agent.browser_registry.lock().unwrap().entries.is_empty());
+            tokio::time::timeout(PEER_WAIT, agent.drain_browser())
+                .await
+                .unwrap()
+                .unwrap();
+            let registry = agent.browser_registry.lock().unwrap();
+            assert!(registry.drained && registry.denied && registry.calls == 0);
+        }
+
+        #[tokio::test]
+        async fn actually_closed_reserve_or_close_reply_remains_unknown_not_a_drain_receipt() {
+            for closing in [false, true] {
+                let (agent, listener, _root) = fixture();
+                let owned = handle("owned", "lost-reply");
+                if closing {
+                    retain(&agent.browser_registry, "owned", owned.clone());
+                }
+                let peer = Peer::start(move || {
+                    let (stream, call) = request(&listener);
+                    assert!(match call {
+                        Request::CreateOwned { project } => !closing && project == "owned",
+                        Request::CloseOwned {
+                            session,
+                            close_tabs: false,
+                        } => closing && session == owned,
+                        _ => false,
+                    });
+                    drop(stream); // Actual EOF before any reply/header/ACK.
+                });
+                let result = tokio::time::timeout(PEER_WAIT, async {
+                    if closing {
+                        agent.browser_close("owned", false).await
+                    } else {
+                        agent.browser_open("owned").await.map(|_| ())
+                    }
+                })
+                .await
+                .unwrap();
+                assert!(matches!(result, Err(BrowserError::Io(_))));
+                peer.join();
+                agent.cancel_browser();
+                let registry = agent.browser_registry.lock().unwrap();
+                assert_eq!(registry.entries.len(), 1);
+                assert_eq!(registry.entries[0].handle.is_some(), closing);
+                assert!(
+                    registry.entries[0].needs_close && registry.calls == 0 && !registry.drained
+                );
+                drop(registry);
+                assert_eq!(agent.resume_browser().err(), Some(Refusal::Busy.into()));
+            }
+        }
     }
 
     #[tokio::test]
