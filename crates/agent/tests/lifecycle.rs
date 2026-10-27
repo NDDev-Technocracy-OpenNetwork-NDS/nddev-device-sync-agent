@@ -16,7 +16,7 @@ use nddev_device_sync_agent::{
 async fn discovery_never_claims_observation_and_closed_hosts_refuse_work() {
     let agent = NativeAgent::discover().unwrap();
     let modules = agent.modules();
-    assert_eq!(modules.len(), 7);
+    assert_eq!(modules.len(), 8);
     assert!(
         modules.iter().all(|module| module.observed_at_ms.is_none()
             && module.reachability == Reachability::NotChecked)

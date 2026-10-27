@@ -1,6 +1,12 @@
-use crate::view::{AgentError, BrowserDocument, BrowserError, ModuleState, Reachability, browser};
+use crate::view::{
+    AgentError, BrowserDocument, BrowserError, CacheError, ModuleState, Reachability, browser,
+    cache,
+};
 use crate::worker::bundled_git_worker;
 use nddev_device_sync_adapter_io::{CancellationToken, IoError, NativeIo};
+use nddev_device_sync_cache_client::binding::Base as CacheBase;
+#[cfg(target_os = "linux")]
+use nddev_device_sync_cache_client::{Client as CacheClient, NetworkCache, Scope as CacheScope};
 use nddev_device_sync_clipboard::{Clipboard, ReadClipboard};
 use nddev_device_sync_domain::{ModuleGraph, ModuleId, Platform, modules::query_outcome};
 use nddev_device_sync_sysinfo::{ReadSystemInfo, SystemInfo};
@@ -253,6 +259,8 @@ pub struct NativeAgent {
     rds: Option<Rds>,
     browser: Option<BrowserUseClient>,
     browser_registry: Mutex<BrowserRegistry>,
+    #[cfg(target_os = "linux")]
+    cache: Option<CacheClient>,
 }
 
 impl Drop for NativeAgent {
@@ -263,6 +271,19 @@ impl Drop for NativeAgent {
 
 impl NativeAgent {
     pub fn discover() -> Result<Self, AgentError> {
+        Self::discover_with_cache_base(None)
+    }
+
+    /// The cache base is supplied by the per-host assembly, never discovered,
+    /// defaulted or synchronized as user intent. None says nothing about any
+    /// durable binding previously installed in this OS user's tool files.
+    pub fn discover_with_cache_base(cache_port: Option<u16>) -> Result<Self, AgentError> {
+        // Validate before any Scope/discovery/probe can run.
+        let cache_base = validated_cache_base(cache_port)?;
+        #[cfg(not(target_os = "linux"))]
+        if cache_base.is_some() {
+            return Err(AgentError::UnsupportedPlatform);
+        }
         let graph = crate::module_graph()?;
         let platform = current_platform();
         let supported = |id: &str| {
@@ -272,6 +293,8 @@ impl NativeAgent {
                 .is_some_and(|descriptor| descriptor.platforms.contains(&platform))
         };
         let io = NativeIo::new(8).map_err(io_error)?;
+        #[cfg(target_os = "linux")]
+        let cache = configured_cache(io.local_handle(), cache_base, CacheScope::user)?;
         let sysinfo = supported("sysinfo")
             .then(|| SystemInfo::for_current_user(io.local_handle()).ok())
             .flatten();
@@ -333,6 +356,16 @@ impl NativeAgent {
                         "gds" => gds.is_some(),
                         "rds" => rds.is_some(),
                         "browser-use" => browser.is_some(),
+                        "cache" => {
+                            #[cfg(target_os = "linux")]
+                            {
+                                cache.is_some()
+                            }
+                            #[cfg(not(target_os = "linux"))]
+                            {
+                                false
+                            }
+                        }
                         _ => false,
                     },
                     reachability: Reachability::NotChecked,
@@ -360,6 +393,8 @@ impl NativeAgent {
                 denied: true,
                 ..Default::default()
             }),
+            #[cfg(target_os = "linux")]
+            cache,
         })
     }
 
@@ -370,6 +405,34 @@ impl NativeAgent {
             .iter()
             .map(|slot| slot.state.clone())
             .collect()
+    }
+
+    /// Read-only observation of the supplied base and this user's managed
+    /// content. Neither marker presence nor HTTP 200 authenticates an RDS route
+    /// or proves that the content names this port. This never binds/unbinds.
+    pub async fn cache_status(&self) -> Result<cache::Status, CacheError> {
+        self.observe_mapped(
+            "cache",
+            |cancellation| async move {
+                #[cfg(target_os = "linux")]
+                {
+                    self.cache
+                        .as_ref()
+                        .ok_or(CacheError::Io(IoError::Unavailable))?
+                        .status(cancellation)
+                        .await
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    let _ = cancellation;
+                    Err(CacheError::UnsupportedPlatform)
+                }
+            },
+            cache_gate_error,
+            cache_observation,
+            cache_success,
+        )
+        .await
     }
 
     /// Deny new browser calls and cancel only this module. This is intent, not
@@ -528,8 +591,14 @@ impl NativeAgent {
         &self,
         work: impl FnOnce(CancellationToken) -> F,
     ) -> Result<T, BrowserError> {
-        self.observe_mapped("browser-use", work, browser_gate_error, browser_observation)
-            .await
+        self.observe_mapped(
+            "browser-use",
+            work,
+            browser_gate_error,
+            browser_observation,
+            |_| Ok(()),
+        )
+        .await
     }
 
     pub async fn browser_status(&self) -> Result<browser::Status, BrowserError> {
@@ -655,7 +724,7 @@ impl NativeAgent {
         module: &'static str,
         work: impl FnOnce(CancellationToken) -> F,
     ) -> Result<T, AgentError> {
-        self.observe_mapped(module, work, |error| error, |error| *error)
+        self.observe_mapped(module, work, |error| error, |error| *error, |_| Ok(()))
             .await
     }
 
@@ -665,6 +734,7 @@ impl NativeAgent {
         work: impl FnOnce(CancellationToken) -> F,
         from_gate: fn(AgentError) -> E,
         project: fn(&E) -> AgentError,
+        success: fn(&T) -> Result<(), AgentError>,
     ) -> Result<T, E> {
         async {
             let started = Instant::now();
@@ -687,7 +757,10 @@ impl NativeAgent {
                     Err(error) => Err(from_gate(error)),
                 }
             };
-            let observation = result.as_ref().map(|_| ()).map_err(project);
+            let observation = match &result {
+                Ok(value) => success(value),
+                Err(error) => Err(project(error)),
+            };
             let observed_at_ms = SystemTime::now().duration_since(UNIX_EPOCH).ok().and_then(|value| value.as_millis().try_into().ok());
             if let Some(slot) = self.modules.lock().unwrap_or_else(|error| error.into_inner()).iter_mut().find(|slot| slot.state.id == module && Arc::ptr_eq(&slot.lifetime, &lifetime)) {
                 slot.state.observe(&observation, observed_at_ms);
@@ -855,6 +928,68 @@ impl NativeAgent {
     }
 }
 
+fn validated_cache_base(port: Option<u16>) -> Result<Option<CacheBase>, AgentError> {
+    port.map(|port| CacheBase::new(port).ok_or(AgentError::InvalidInput))
+        .transpose()
+}
+
+#[cfg(target_os = "linux")]
+fn configured_cache(
+    io: nddev_device_sync_adapter_io::LocalIo,
+    base: Option<CacheBase>,
+    scope: impl FnOnce() -> Result<CacheScope, CacheError>,
+) -> Result<Option<CacheClient>, AgentError> {
+    let Some(base) = base else {
+        return Ok(None);
+    };
+    let scope = scope().map_err(|error| cache_observation(&error))?;
+    Ok(Some(CacheClient::new(io, scope, base)))
+}
+
+fn cache_success(status: &cache::Status) -> Result<(), AgentError> {
+    if status.ready {
+        Ok(())
+    } else {
+        Err(AgentError::Unavailable)
+    }
+}
+
+fn cache_gate_error(error: AgentError) -> CacheError {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        match error {
+            AgentError::UnsupportedPlatform => CacheError::UnsupportedPlatform,
+            AgentError::Unavailable => IoError::Unavailable.into(),
+            AgentError::Busy => CacheError::Busy,
+            AgentError::InvalidInput => CacheError::Invalid,
+            AgentError::Timeout => IoError::Timeout.into(),
+            AgentError::Cancelled => IoError::Cancelled.into(),
+            AgentError::ProviderFailed => IoError::Transport.into(),
+            AgentError::InvalidResponse | AgentError::InvalidContract => {
+                IoError::InvalidResponse.into()
+            }
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = error;
+        CacheError::UnsupportedPlatform
+    }
+}
+
+/// Observation only: callers keep the exact owning refusal/result.
+fn cache_observation(error: &CacheError) -> AgentError {
+    match error {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        CacheError::Io(error) => io_error_ref(error),
+        CacheError::Conflict | CacheError::Invalid => AgentError::InvalidInput,
+        CacheError::NotReady => AgentError::Unavailable,
+        CacheError::Busy => AgentError::Busy,
+        CacheError::Uncertain => AgentError::ProviderFailed,
+        CacheError::UnsupportedPlatform => AgentError::UnsupportedPlatform,
+    }
+}
+
 fn io_error(error: IoError) -> AgentError {
     io_error_ref(&error)
 }
@@ -993,6 +1128,328 @@ fn executable(name: &str) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn zero_cache_base_is_rejected_before_any_discovery_or_scope() {
+        assert_eq!(
+            NativeAgent::discover_with_cache_base(Some(0)).err(),
+            Some(AgentError::InvalidInput)
+        );
+        assert!(validated_cache_base(None).unwrap().is_none());
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn explicit_cache_base_is_unsupported_before_non_linux_discovery() {
+        assert_eq!(
+            NativeAgent::discover_with_cache_base(Some(1)).err(),
+            Some(AgentError::UnsupportedPlatform)
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    mod cache_status {
+        use super::*;
+        use nddev_device_sync_cache_client::binding::{BEGIN, END, Target};
+        use std::{
+            io::{BufReader, Read, Write},
+            net::TcpListener,
+            sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+        };
+
+        const WAIT: Duration = Duration::from_secs(5);
+        struct Probe {
+            base: CacheBase,
+            stop: Arc<AtomicBool>,
+            accepted: Arc<AtomicUsize>,
+            task: Option<std::thread::JoinHandle<()>>,
+        }
+        impl Probe {
+            fn new(ready: bool) -> Self {
+                let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+                listener.set_nonblocking(true).unwrap();
+                let base = CacheBase::new(listener.local_addr().unwrap().port()).unwrap();
+                let stop = Arc::new(AtomicBool::new(false));
+                let accepted = Arc::new(AtomicUsize::new(0));
+                let (stopping, observed) = (stop.clone(), accepted.clone());
+                let task = std::thread::spawn(move || {
+                    let deadline = Instant::now() + WAIT;
+                    while !stopping.load(Ordering::Acquire) && Instant::now() < deadline {
+                        match listener.accept() {
+                            Ok((mut stream, _)) => {
+                                observed.fetch_add(1, Ordering::AcqRel);
+                                stream.set_read_timeout(Some(WAIT)).unwrap();
+                                stream.set_write_timeout(Some(WAIT)).unwrap();
+                                let mut request = Vec::new();
+                                {
+                                    let mut input = BufReader::new(&mut stream).take(512);
+                                    while !request.ends_with(b"\r\n\r\n") {
+                                        let mut byte = [0u8; 1];
+                                        input.read_exact(&mut byte).unwrap();
+                                        request.push(byte[0]);
+                                    }
+                                }
+                                assert!(request.starts_with(b"GET /v1/ready HTTP/1.1\r\n"));
+                                let response: &[u8] = if ready {
+                                    b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                                } else {
+                                    b"HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                                };
+                                stream.write_all(response).unwrap();
+                                break;
+                            }
+                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                                std::thread::sleep(Duration::from_millis(1));
+                            }
+                            Err(error) => panic!("private readiness listener: {:?}", error.kind()),
+                        }
+                    }
+                });
+                Self {
+                    base,
+                    stop,
+                    accepted,
+                    task: Some(task),
+                }
+            }
+        }
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                self.stop.store(true, Ordering::Release);
+                if let Some(task) = self.task.take() {
+                    let result = task.join();
+                    if !std::thread::panicking() {
+                        result.expect("private readiness peer");
+                    }
+                }
+            }
+        }
+        fn lane(root: &Path) -> CacheScope {
+            CacheScope::lane_in(root, |name| {
+                (name == "HOME").then(|| root.as_os_str().to_owned())
+            })
+            .unwrap()
+        }
+        fn agent(client: Option<CacheClient>) -> NativeAgent {
+            let mut agent = browser_agent();
+            let configured = client.is_some();
+            agent.cache = client;
+            agent
+                .modules
+                .lock()
+                .unwrap()
+                .iter_mut()
+                .find(|slot| slot.state.id == "cache")
+                .unwrap()
+                .state
+                .configured = configured;
+            agent
+        }
+        fn files(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+            let mut pending = vec![root.to_owned()];
+            let mut found = Vec::new();
+            while let Some(directory) = pending.pop() {
+                for entry in std::fs::read_dir(directory).unwrap() {
+                    let path = entry.unwrap().path();
+                    if path.is_dir() {
+                        pending.push(path);
+                    } else {
+                        found.push((
+                            path.strip_prefix(root).unwrap().to_owned(),
+                            std::fs::read(path).unwrap(),
+                        ));
+                    }
+                }
+            }
+            found.sort();
+            found
+        }
+
+        #[tokio::test]
+        async fn absent_cache_base_never_requests_a_scope_and_does_not_claim_direct_mode() {
+            let client = configured_cache(
+                NativeIo::new(1).unwrap().local_handle(),
+                validated_cache_base(None).unwrap(),
+                || panic!("None must not inspect a cache scope"),
+            )
+            .unwrap();
+            let agent = agent(client);
+            assert_eq!(
+                tokio::time::timeout(WAIT, agent.cache_status())
+                    .await
+                    .unwrap()
+                    .err(),
+                Some(CacheError::Io(IoError::Unavailable))
+            );
+            let state = agent
+                .modules()
+                .into_iter()
+                .find(|state| state.id == "cache")
+                .unwrap();
+            assert!(!state.configured && state.observed_at_ms.is_none());
+        }
+        #[test]
+        fn explicit_scope_refusal_is_not_silently_treated_as_absent_configuration() {
+            assert_eq!(
+                configured_cache(
+                    NativeIo::new(1).unwrap().local_handle(),
+                    validated_cache_base(Some(1)).unwrap(),
+                    || Err(CacheError::Conflict)
+                )
+                .err(),
+                Some(AgentError::InvalidInput)
+            );
+        }
+        #[tokio::test]
+        async fn ready_status_uses_real_client_and_never_changes_the_disposable_scope() {
+            let root = tempfile::tempdir().unwrap();
+            let peer = Probe::new(true);
+            let client = configured_cache(
+                NativeIo::new(1).unwrap().local_handle(),
+                Some(peer.base.clone()),
+                || Ok(lane(root.path())),
+            )
+            .unwrap();
+            assert_eq!(
+                peer.accepted.load(Ordering::Acquire),
+                0,
+                "construction must not probe"
+            );
+            let agent = agent(client);
+            let before = files(root.path());
+            let status = tokio::time::timeout(WAIT, agent.cache_status())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(status.ready);
+            assert_eq!(status.port, peer.base.port());
+            assert!(status.bindings.iter().all(|binding| !binding.bound));
+            assert_eq!(files(root.path()), before);
+            let state = agent
+                .modules()
+                .into_iter()
+                .find(|state| state.id == "cache")
+                .unwrap();
+            assert!(state.error.is_none() && state.observed_at_ms.is_some());
+            assert_eq!(peer.accepted.load(Ordering::Acquire), 1);
+        }
+        #[tokio::test]
+        async fn nonready_status_is_returned_losslessly_but_not_observed_as_ready() {
+            let root = tempfile::tempdir().unwrap();
+            let peer = Probe::new(false);
+            let client = configured_cache(
+                NativeIo::new(1).unwrap().local_handle(),
+                Some(peer.base.clone()),
+                || Ok(lane(root.path())),
+            )
+            .unwrap();
+            let agent = agent(client);
+            let status = tokio::time::timeout(WAIT, agent.cache_status())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(!status.ready);
+            assert_eq!(status.port, peer.base.port());
+            assert_eq!(peer.accepted.load(Ordering::Acquire), 1);
+            let state = agent
+                .modules()
+                .into_iter()
+                .find(|state| state.id == "cache")
+                .unwrap();
+            assert_eq!(state.error, Some(AgentError::Unavailable));
+            assert!(state.observed_at_ms.is_some());
+            assert!(files(root.path()).is_empty());
+        }
+        #[tokio::test]
+        async fn managed_marker_presence_does_not_claim_binding_to_supplied_base() {
+            let root = tempfile::tempdir().unwrap();
+            let peer = Probe::new(true);
+            let old = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+            let old_port = old.local_addr().unwrap().port();
+            assert_ne!(old_port, peer.base.port());
+            let scope = lane(root.path());
+            let path = scope.path(Target::Cargo);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, format!("{BEGIN}\n[source.crates-io]\nreplace-with = 'nds-cache'\n[source.nds-cache]\nregistry = 'sparse+http://127.0.0.1:{old_port}/crates-index/'\n{END}\n")).unwrap();
+            let before = files(root.path());
+            let client = configured_cache(
+                NativeIo::new(1).unwrap().local_handle(),
+                Some(peer.base.clone()),
+                || Ok(scope),
+            )
+            .unwrap();
+            let status = tokio::time::timeout(WAIT, agent(client).cache_status())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(status.ready);
+            assert_eq!(status.port, peer.base.port());
+            assert!(
+                status
+                    .bindings
+                    .iter()
+                    .any(|binding| binding.kind == "cargo" && binding.bound)
+            );
+            assert_eq!(files(root.path()), before);
+        }
+        #[tokio::test]
+        async fn observer_preserves_exact_owning_refusals_while_projecting_coarse_errors() {
+            let cases: [(fn() -> CacheError, AgentError); 10] = [
+                (|| CacheError::Busy, AgentError::Busy),
+                (|| CacheError::Conflict, AgentError::InvalidInput),
+                (|| CacheError::Invalid, AgentError::InvalidInput),
+                (|| CacheError::NotReady, AgentError::Unavailable),
+                (|| CacheError::Uncertain, AgentError::ProviderFailed),
+                (
+                    || CacheError::UnsupportedPlatform,
+                    AgentError::UnsupportedPlatform,
+                ),
+                (|| CacheError::Io(IoError::Busy), AgentError::Busy),
+                (|| CacheError::Io(IoError::Timeout), AgentError::Timeout),
+                (|| CacheError::Io(IoError::Cancelled), AgentError::Cancelled),
+                (
+                    || CacheError::Io(IoError::InvalidFrame),
+                    AgentError::InvalidResponse,
+                ),
+            ];
+            // Explicit synthetic admission through the REAL shared observer,
+            // not a cache mutation or a claim about an absent provider.
+            let agent = browser_agent();
+            for (make, expected) in cases {
+                let before = agent
+                    .modules()
+                    .into_iter()
+                    .find(|state| state.id == "cache")
+                    .unwrap();
+                let result: Result<cache::Status, CacheError> = agent
+                    .observe_mapped(
+                        "cache",
+                        |_| async move { Err(make()) },
+                        cache_gate_error,
+                        cache_observation,
+                        cache_success,
+                    )
+                    .await;
+                assert_eq!(result, Err(make()));
+                let state = agent
+                    .modules()
+                    .into_iter()
+                    .find(|state| state.id == "cache")
+                    .unwrap();
+                if matches!(
+                    query_outcome::<()>(&Err(expected)),
+                    nddev_device_sync_domain::modules::ModuleOutcome::NotAdmitted
+                        | nddev_device_sync_domain::modules::ModuleOutcome::Cancelled
+                ) {
+                    assert_eq!(state.error, before.error);
+                    assert_eq!(state.observed_at_ms, before.observed_at_ms);
+                    assert!(state.reachability == before.reachability);
+                } else {
+                    assert_eq!(state.error, Some(expected));
+                }
+            }
+        }
+    }
+
     fn browser_agent() -> NativeAgent {
         // An explicitly admitted synthetic composition. No discovery, provider
         // calls, browser sockets, executor or runtime tasks.
@@ -1030,6 +1487,8 @@ mod tests {
                 .unwrap(),
             ),
             browser_registry: Mutex::default(),
+            #[cfg(target_os = "linux")]
+            cache: None,
         }
     }
 
