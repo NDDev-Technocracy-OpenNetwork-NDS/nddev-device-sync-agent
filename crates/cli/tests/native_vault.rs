@@ -219,11 +219,19 @@ async fn background_handoff(
             .any(|v| v == b"gds.catalog.read.failed")
     );
     let stopped = stop(owner, "-TERM").await;
-    assert!(stopped["gds"]["error"].is_string());
+    assert!(
+        stopped["gds"]["error"].is_string(),
+        "stopped catalog observation: {}",
+        stopped["gds"]
+    );
     // A separate process can now become owner, without logging out or changing keys.
     wait_for(&follower_log, b"gds.catalog.read.failed", secret).await;
     let stopped = stop(follower, "-INT").await;
-    assert!(stopped["gds"]["error"].is_string());
+    assert!(
+        stopped["gds"]["error"].is_string(),
+        "stopped catalog observation: {}",
+        stopped["gds"]
+    );
     // A retained resource cannot acquire a fresh local-use generation after its
     // native owner has been permanently stopped. The caller itself stays valid.
     let native = nddev_device_sync_vault::replication::native::NativeReplica::attach(
