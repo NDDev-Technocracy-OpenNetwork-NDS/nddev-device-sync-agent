@@ -93,7 +93,8 @@ mod qualified {
         )
         .join("providers/gds")
         .join(revision);
-        let status = Command::new("cargo")
+        let mut command = Command::new("cargo");
+        command
             .args([
                 "build",
                 "--locked",
@@ -102,20 +103,81 @@ mod qualified {
                 "nds-gds-readonly-worker",
                 "--target",
                 target,
+                "--message-format=json-render-diagnostics",
                 "--manifest-path",
             ])
             .arg(&manifest)
-            .arg("--target-dir")
-            .arg(&build)
-            .env("CARGO_BUILD_BUILD_DIR", build.join("build"))
+            .current_dir(&root);
+        if std::env::var_os("NDS_CACHE_FRONTENDS").is_some() {
+            // The managed frontend owns nested source-scoped placement and
+            // leases. Host-only final/intermediate overrides must not force the
+            // provider into its parent's target or an uninitialized cache path.
+            command
+                .env_remove("CARGO_TARGET_DIR")
+                .env_remove("CARGO_BUILD_TARGET_DIR")
+                .env_remove("CARGO_BUILD_BUILD_DIR");
+        } else {
+            command
+                .arg("--target-dir")
+                .arg(&build)
+                .env("CARGO_BUILD_BUILD_DIR", build.join("build"));
+        }
+        let mut child = command
             .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
+            .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
-            .status()?;
-        if !status.success() {
+            .spawn()?;
+        const BUILD_OUTPUT_LIMIT: u64 = 32 * 1024 * 1024;
+        let mut output = Vec::new();
+        let read = child
+            .stdout
+            .take()
+            .ok_or("missing Cargo build output")?
+            .take(BUILD_OUTPUT_LIMIT + 1)
+            .read_to_end(&mut output);
+        if read.is_err() || output.len() as u64 > BUILD_OUTPUT_LIMIT {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("Cargo build output exceeded its bound or could not be read".into());
+        }
+        if !child.wait()?.success() {
             return Err("locked GDS worker build failed".into());
         }
-        let worker = build.join(target).join("release/nds-gds-readonly-worker");
+        let manifest = manifest.canonicalize()?;
+        let mut worker = None;
+        for line in output
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+        {
+            let event: Value = serde_json::from_slice(line)?;
+            if event["reason"] != "compiler-artifact"
+                || event["target"]["name"] != "nds-gds-readonly-worker"
+                || !event["target"]["kind"]
+                    .as_array()
+                    .is_some_and(|kinds| kinds.iter().any(|kind| kind == "bin"))
+            {
+                continue;
+            }
+            let owner = PathBuf::from(
+                event["manifest_path"]
+                    .as_str()
+                    .ok_or("missing worker artifact manifest")?,
+            )
+            .canonicalize()?;
+            if owner != manifest || worker.is_some() {
+                return Err("worker artifact is not uniquely owned by the pinned manifest".into());
+            }
+            let path = PathBuf::from(
+                event["executable"]
+                    .as_str()
+                    .ok_or("missing worker executable artifact")?,
+            );
+            if !path.is_absolute() {
+                return Err("worker artifact path must be absolute".into());
+            }
+            worker = Some(path);
+        }
+        let worker = worker.ok_or("Cargo reported no canonical worker artifact")?;
         let size = fs::metadata(&worker)?.len();
         if size == 0 || size > GDS_WORKER_MAX_BYTES {
             return Err("worker size is outside the artifact bound".into());

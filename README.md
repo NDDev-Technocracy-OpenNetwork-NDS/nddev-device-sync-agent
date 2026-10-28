@@ -2,9 +2,9 @@
 
 AGPL-3.0-only native integration for NDS. [NDDev OpenNetwork](https://nddev.ai).
 
-`crates/agent` composes the six compiled-in native adapters: sysinfo, clipboard,
-cleaner, updater, GDS and RDS. Each adapter owns its manifest and provider
-contract. The Flutter client calls the library to read actual native state;
+`crates/agent` composes eight compiled-in native module clients: sysinfo,
+clipboard, cleaner, updater, GDS, RDS, browser-use and cache. Each module owns
+its manifest and functional contract; I/O adapters remain internal boundaries. The Flutter client calls the library to read actual native state;
 configuration, untested reachability and a completed observation are distinct.
 Mobile consumers share portable view types; local native tools require a
 supported desktop host.
@@ -32,6 +32,11 @@ secret natively for the official provider identity check; raw provider output
 and credentials are never returned. Sign in through NDS first. The CLI uses the
 same native session/device/vault stores and reconciles the server replica before
 use; conflicts, revocation and incomplete catch-up deny secret consumption.
+
+The selected Accounts client requires a compatible NDS server exposing the
+original personal device context. An older server reports
+`personal_context_unavailable`; it never substitutes another scope or a legacy
+inventory result.
 
 `github source` reads the encrypted account-wide GitHub choice.
 `github source select <ref> <revision> [pending_id]` saves a record version from
