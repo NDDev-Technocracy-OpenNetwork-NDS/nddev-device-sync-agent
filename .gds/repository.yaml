@@ -4,6 +4,7 @@ repository:
   display_name: "nddev-device-sync-agent"
   roles:
     - "project"
+    - "module"
   lifecycle: "active"
 provider:
   type: "github"
@@ -40,3 +41,13 @@ agent:
     provenance_required: false
 release:
   mode: "none"
+
+module:
+  contract: public
+  consumption:
+  - git-submodule
+  compatibility: commit-contract
+  pin_policy: default-branch-commit
+  publication:
+    github_release: optional
+  development: embedded
