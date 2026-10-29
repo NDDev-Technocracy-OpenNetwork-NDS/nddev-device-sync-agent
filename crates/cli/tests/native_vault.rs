@@ -206,6 +206,18 @@ async fn background_handoff(
         assert_eq!(value["stopped"], true);
         value
     }
+    fn refused_or_unobserved(stopped: &Value) {
+        let observation = stopped.get("gds").expect("missing catalog observation");
+        // Health is conditional on the current protected source/configuration
+        // read. Absence is unknown, never successful provider readiness. The
+        // correlated real provider refusal is required separately above.
+        assert!(
+            observation.is_null()
+                || observation["error"] == "provider_unavailable"
+                    && observation["observed_at_ms"].as_u64().is_some(),
+            "stopped catalog observation: {observation}"
+        );
+    }
     let (owner, owner_log) = spawn("owner");
     wait_for(&owner_log, b"gds.catalog.read.failed", secret).await;
     let (follower, follower_log) = spawn("follower");
@@ -219,11 +231,11 @@ async fn background_handoff(
             .any(|v| v == b"gds.catalog.read.failed")
     );
     let stopped = stop(owner, "-TERM").await;
-    assert!(stopped["gds"]["error"].is_string());
+    refused_or_unobserved(&stopped);
     // A separate process can now become owner, without logging out or changing keys.
     wait_for(&follower_log, b"gds.catalog.read.failed", secret).await;
     let stopped = stop(follower, "-INT").await;
-    assert!(stopped["gds"]["error"].is_string());
+    refused_or_unobserved(&stopped);
     // A retained resource cannot acquire a fresh local-use generation after its
     // native owner has been permanently stopped. The caller itself stays valid.
     let native = nddev_device_sync_vault::replication::native::NativeReplica::attach(
