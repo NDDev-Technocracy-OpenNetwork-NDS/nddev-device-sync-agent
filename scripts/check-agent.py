@@ -14,13 +14,18 @@ if sys.platform != "linux":
     raise SystemExit("This provider qualification requires Linux")
 root = Path(__file__).resolve().parent.parent
 provider = Path(os.environ["NDS_TEST_SYSINFO_DAEMON"]).resolve(strict=True)
+metadata = subprocess.run(
+    ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
+    cwd=root, text=True, capture_output=True, check=True, timeout=60,
+)
+bundle = Path(json.loads(metadata.stdout)["target_directory"]) / "agent-worker-fixture"
 artifact = subprocess.run(
     ["cargo", "run", "--locked", "-p", "nddev-device-sync-agent", "--bin",
-     "nds-package-gds-worker", "--", "--bundle", str(root / "target/agent-worker-fixture")],
+     "nds-package-gds-worker", "--", "--bundle", str(bundle)],
     cwd=root, text=True, capture_output=True, check=True, timeout=300,
 )
 receipt = json.loads(artifact.stdout.splitlines()[-1])
-worker = root / "target/agent-worker-fixture/nds-gds-readonly-worker"
+worker = bundle / "nds-gds-readonly-worker"
 build_environment = {**os.environ, **receipt["host_build_environment"]}
 build = subprocess.run(
     ["cargo", "test", "--locked", "-p", "nddev-device-sync-agent", "--test", "lifecycle",
