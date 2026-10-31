@@ -3202,7 +3202,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-gds"
 version = "0.0.1-alpha.7"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds?rev=b4ce1c271067ebd1aeb8948087465da978f8403c#b4ce1c271067ebd1aeb8948087465da978f8403c"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds?rev=dbcb003ce882c6e7d8a84d983487709228fd6f4c#dbcb003ce882c6e7d8a84d983487709228fd6f4c"
 dependencies = [
  "base64 0.23.1",
  "gix",
@@ -3304,7 +3304,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-vault"
 version = "0.0.1-alpha.12"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-vault?rev=54a823e7c7bf94c8902029c9eb54577ee9cfec16#54a823e7c7bf94c8902029c9eb54577ee9cfec16"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-vault?rev=ca97b8b48c637013d43fcc087e1f3715a3c61ef3#ca97b8b48c637013d43fcc087e1f3715a3c61ef3"
 dependencies = [
  "base16ct",
  "base64 0.23.1",
