@@ -16,8 +16,9 @@ nddev-device-sync-vault = { version = "=0.0.1-alpha.12", git = "https://github.c
 serde_json = "1"
 tracing = "0.1"
 nddev-device-sync-telemetry = { version = "=0.0.1-alpha.11", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-observability", rev = "32f21f8a8f9c313bee9dcd1769c042133b5520da", features = ["client-traces"] }
-tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time", "signal"] }
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "time", "signal", "io-std", "io-util"] }
 zeroize = "1.8"
+uuid = { version = "1.27", features = ["v4"] }
 
 [features]
 development-http = ["nddev-device-sync-accounts/development-http", "nddev-device-sync-vault/development-http"]
