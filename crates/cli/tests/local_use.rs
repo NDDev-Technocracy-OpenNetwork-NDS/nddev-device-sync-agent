@@ -133,6 +133,20 @@ async fn the_bridge_keeps_the_original_authority_until_it_changes() {
             .status,
         200
     );
+    // The fixture operator admits current writes for this fresh, empty owner.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Ok(bytes) = std::fs::read(&receipt)
+                && let Ok(state) = serde_json::from_slice::<Value>(&bytes)
+                && state["new_operation_version"] == 3
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("owned fixture did not finish empty-owner admission");
     let root = std::path::PathBuf::from(std::env::var_os("XDG_STATE_HOME").unwrap());
     assert!(
         root.is_absolute() && root.starts_with(std::path::Path::new(&receipt).parent().unwrap())
