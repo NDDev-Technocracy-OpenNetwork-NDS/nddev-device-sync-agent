@@ -8,11 +8,11 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-nddev-device-sync-gds = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds", rev = "dbcb003ce882c6e7d8a84d983487709228fd6f4c", features = ["catalog-runtime", "commit-sync"] }
-nddev-device-sync-domain = { version = "=0.0.12", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-core.git", rev = "238dcec49849712758b6559facce70c2d226b42c" }
+nddev-device-sync-gds = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds", rev = "e0c818fe1ea88fe2fb890cc47151d4ea133911c2", features = ["catalog-runtime", "commit-sync"] }
+nddev-device-sync-domain = { version = "=0.0.12", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-core.git", rev = "088e658126c7aabe637b782c1a152f90fce0b47f" }
 nddev-device-sync-adapter-io = { version = "=0.0.1-alpha.4", path = "../io" }
-nddev-device-sync-accounts = { version = "=0.0.1-alpha.24", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-accounts", rev = "557c208e9462c0458506d98b7d1a645eb08ec50b" }
-nddev-device-sync-vault = { version = "=0.0.1-alpha.12", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-vault", rev = "ca97b8b48c637013d43fcc087e1f3715a3c61ef3" }
+nddev-device-sync-accounts = { version = "=0.0.1-alpha.24", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-accounts", rev = "b1066cbcdb91f1d2d7d7dc562d6e4a7cf46b5845" }
+nddev-device-sync-vault = { version = "=0.0.1-alpha.12", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-vault", rev = "00f8e9a5f2c835f09c8deb42151305d32a6e9df5" }
 serde_json = "1"
 tracing = "0.1"
 nddev-device-sync-telemetry = { version = "=0.0.1-alpha.11", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-observability", rev = "32f21f8a8f9c313bee9dcd1769c042133b5520da", features = ["client-traces"] }
