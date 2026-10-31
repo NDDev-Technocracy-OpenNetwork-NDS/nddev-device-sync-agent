@@ -1,0 +1,17 @@
+# One grouped pull request into dev for every GitHub Actions update; the 7-day cooldown keeps
+# brand-new releases out until they have settled (STD-0004 R-0003 update channel).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 1
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: ci
