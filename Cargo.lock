@@ -3202,7 +3202,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-gds"
 version = "0.0.1-alpha.7"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds?rev=218685c4bdeddf4c0586ddc8214030efafd383cd#218685c4bdeddf4c0586ddc8214030efafd383cd"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds?rev=609a81921987c8962d25b6e87b4850a387f04157#609a81921987c8962d25b6e87b4850a387f04157"
 dependencies = [
  "base64 0.23.1",
  "gix",
@@ -3245,7 +3245,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-rds"
 version = "0.0.1-alpha.2"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-rds?rev=bed667ef0685ed4a650756286053ad82e691df8b#bed667ef0685ed4a650756286053ad82e691df8b"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-rds?rev=1357a92366bafeda68307dee21ee15f5e153af47#1357a92366bafeda68307dee21ee15f5e153af47"
 dependencies = [
  "nddev-device-sync-adapter-io",
  "serde",
