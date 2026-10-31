@@ -23,7 +23,7 @@ nddev-device-sync-sysinfo = { version = "=0.0.1-alpha.1", git = "https://github.
 nddev-device-sync-clipboard = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-clipboard", rev = "cda9b29d2ddd96dafdecbe1fed593fe24fba428e" }
 nddev-device-sync-cleaner = { version = "=0.0.1-alpha.2", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-cleaner", rev = "5b3f3e92d6ea7b18dfe2c2ab89f1828a0329339f" }
 nddev-device-sync-updater = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-updater", rev = "9503dbe004939dc3d3b4c23f452c9f87097896b7" }
-nddev-device-sync-github = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-github", rev = "10353d17493f0e29020fa82a5c82a707e2135e81" }
+nddev-device-sync-github = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-github", rev = "67b984ca3f593104bc7793ae38452803adf7ec03" }
 nddev-device-sync-remote = { version = "=0.0.1-alpha.2", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-remote", rev = "37e1ea149e624a6c952b25e3e66a6bf5319351d6" }
 
 [dev-dependencies]
