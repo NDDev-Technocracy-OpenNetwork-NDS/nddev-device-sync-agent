@@ -1614,11 +1614,13 @@ mod tests {
                 .unwrap();
             assert!(status.ready);
             assert_eq!(status.port, peer.base.port());
+            // A managed file naming another port is visible but not in force
+            // for the supplied base; the client reports exact bindings only.
             assert!(
                 status
                     .bindings
                     .iter()
-                    .any(|binding| binding.kind == "cargo" && binding.bound)
+                    .any(|binding| binding.kind == "cargo" && !binding.bound)
             );
             assert_eq!(files(root.path()), before);
         }
