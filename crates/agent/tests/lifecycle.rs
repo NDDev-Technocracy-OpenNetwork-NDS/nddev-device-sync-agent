@@ -83,12 +83,12 @@ async fn cached_missing_provider_is_not_a_fresh_native_observation() {
     let state = agent
         .modules()
         .into_iter()
-        .find(|module| module.id == "rds")
+        .find(|module| module.id == "remote")
         .unwrap();
     assert!(!state.configured);
     assert!(state.reachability == Reachability::NotChecked);
     assert!(state.observed_at_ms.is_none() && state.error.is_none());
-    assert_query_span(&feed, "rds", 2);
+    assert_query_span(&feed, "remote", 2);
     traces.shutdown();
 }
 
@@ -231,7 +231,7 @@ async fn native_timeout_uses_core_failure_observation_and_error_span() {
 
 #[tokio::test]
 #[ignore = "requires scripts/check-agent.py with the verified packaged Rust worker and owned Git repository"]
-async fn native_gds_query_uses_core_observation_and_projection() {
+async fn native_github_query_uses_core_observation_and_projection() {
     let repository = std::path::PathBuf::from(std::env::var("NDS_AGENT_TEST_REPOSITORY").unwrap());
     assert!(repository.is_absolute());
     let agent = NativeAgent::discover().unwrap();
@@ -245,7 +245,7 @@ async fn native_gds_query_uses_core_observation_and_projection() {
     let state = agent
         .modules()
         .into_iter()
-        .find(|module| module.id == "gds")
+        .find(|module| module.id == "github")
         .unwrap();
     assert!(
         state.configured && state.reachability == Reachability::Reachable && state.error.is_none()
@@ -259,21 +259,21 @@ async fn native_gds_query_uses_core_observation_and_projection() {
         .validate(
             &DeviceId::new("fixture-device").unwrap(),
             EntityKind::ModuleState,
-            "fixture-device:gds",
+            "fixture-device:github",
         )
         .unwrap();
-    assert_query_span(&feed, "gds", 0);
+    assert_query_span(&feed, "github", 0);
     traces.shutdown();
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 #[tokio::test]
-async fn unqualified_gds_platform_is_unconfigured_and_refuses_queries() {
+async fn unqualified_github_platform_is_unconfigured_and_refuses_queries() {
     let agent = NativeAgent::discover().unwrap();
     let state = agent
         .modules()
         .into_iter()
-        .find(|module| module.id == "gds")
+        .find(|module| module.id == "github")
         .unwrap();
     assert!(!state.configured && state.observed_at_ms.is_none());
     assert!(matches!(
@@ -286,16 +286,16 @@ async fn unqualified_gds_platform_is_unconfigured_and_refuses_queries() {
 
 #[tokio::test]
 #[ignore = "requires scripts/check-agent.py with invalid owned worker copies"]
-async fn gds_worker_admission_has_no_path_fallback() {
+async fn github_worker_admission_has_no_path_fallback() {
     let case = std::env::var("NDS_INVALID_WORKER").unwrap();
-    let marker = std::path::PathBuf::from(std::env::var("NDS_GDS_EXECUTION_MARKER").unwrap());
+    let marker = std::path::PathBuf::from(std::env::var("NDS_GITHUB_EXECUTION_MARKER").unwrap());
     match case.as_str() {
         "missing" | "wrong-sibling" => {
             let agent = NativeAgent::discover().unwrap();
             let state = agent
                 .modules()
                 .into_iter()
-                .find(|state| state.id == "gds")
+                .find(|state| state.id == "github")
                 .unwrap();
             assert!(!state.configured && state.observed_at_ms.is_none());
             let repository =

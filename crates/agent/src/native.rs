@@ -23,8 +23,8 @@ use nddev_device_sync_browser_use::{
     protocol::{MAX_SESSIONS, Refusal, valid_project},
 };
 use nddev_device_sync_cleaner::{Cleaner, ReadCleaner};
-use nddev_device_sync_gds::Gds;
-use nddev_device_sync_rds::{Rds, ReadRds};
+use nddev_device_sync_github::Github;
+use nddev_device_sync_remote::{ReadRemote, Remote};
 use nddev_device_sync_updater::{ReadUpdater, Updater};
 
 struct ModuleSlot {
@@ -363,8 +363,8 @@ pub struct NativeAgent {
     clipboard: Option<Clipboard>,
     cleaner: Option<Cleaner>,
     updater: Option<Updater>,
-    gds: Option<Gds>,
-    rds: Option<Rds>,
+    github: Option<Github>,
+    remote: Option<Remote>,
     browser: Option<BrowserUseClient>,
     browser_registry: Mutex<BrowserRegistry>,
     #[cfg(target_os = "linux")]
@@ -431,10 +431,10 @@ impl NativeAgent {
         } else {
             None
         };
-        let gds = if supported("gds") {
+        let github = if supported("github") {
             bundled_git_worker()?
                 .map(|path| {
-                    Gds::new(
+                    Github::new(
                         io.process_handle(),
                         path,
                         std::time::Duration::from_secs(12),
@@ -444,11 +444,11 @@ impl NativeAgent {
         } else {
             None
         };
-        let rds = if supported("rds") {
+        let remote = if supported("remote") {
             executable("rds")
-                .map(|path| Rds::new(io.process_handle(), path, None))
+                .map(|path| Remote::new(io.process_handle(), path, None))
                 .transpose()
-                .map_err(rds_error)?
+                .map_err(remote_error)?
         } else {
             None
         };
@@ -463,8 +463,8 @@ impl NativeAgent {
                         "clipboard" => clipboard.is_some(),
                         "cleaner" => cleaner.is_some(),
                         "updater" => updater.is_some(),
-                        "gds" => gds.is_some(),
-                        "rds" => rds.is_some(),
+                        "github" => github.is_some(),
+                        "remote" => remote.is_some(),
                         "browser-use" => browser.is_some(),
                         "cache" => {
                             #[cfg(target_os = "linux")]
@@ -494,8 +494,8 @@ impl NativeAgent {
             clipboard,
             cleaner,
             updater,
-            gds,
-            rds,
+            github,
+            remote,
             browser,
             // Provider discovery grants no browser attempt. Shared explicitly
             // validates configuration, drains, then resumes this composition.
@@ -520,7 +520,7 @@ impl NativeAgent {
     }
 
     /// Read-only observation of the supplied base and this user's managed
-    /// content. Neither marker presence nor HTTP 200 authenticates an RDS route
+    /// content. Neither marker presence nor HTTP 200 authenticates a remote-module route
     /// or proves that the content names this port. This never binds/unbinds.
     pub async fn cache_status(&self) -> Result<cache::Status, CacheError> {
         #[cfg(target_os = "linux")]
@@ -1131,11 +1131,11 @@ impl NativeAgent {
     pub async fn repository_status(
         &self,
         path: &Path,
-    ) -> Result<nddev_device_sync_gds::Status, AgentError> {
-        self.observe("gds", |cancellation| async move {
+    ) -> Result<nddev_device_sync_github::Status, AgentError> {
+        self.observe("github", |cancellation| async move {
             // Fixed sibling and build-embedded digest, never runtime PATH/env.
             bundled_git_worker()?.ok_or(AgentError::Unavailable)?;
-            self.gds
+            self.github
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
                 .status(path, cancellation)
@@ -1146,14 +1146,14 @@ impl NativeAgent {
 
     pub async fn remote_sessions(
         &self,
-    ) -> Result<nddev_device_sync_rds::view::RemoteSnapshot, AgentError> {
-        self.observe("rds", |cancellation| async move {
-            self.rds
+    ) -> Result<nddev_device_sync_remote::view::RemoteSnapshot, AgentError> {
+        self.observe("remote", |cancellation| async move {
+            self.remote
                 .as_ref()
                 .ok_or(AgentError::Unavailable)?
                 .sessions(cancellation)
                 .await
-                .map_err(rds_error)
+                .map_err(remote_error)
         })
         .await
     }
@@ -1321,11 +1321,11 @@ fn updater_error(error: nddev_device_sync_updater::Error) -> AgentError {
     }
 }
 
-fn rds_error(error: nddev_device_sync_rds::Error) -> AgentError {
+fn remote_error(error: nddev_device_sync_remote::Error) -> AgentError {
     match error {
-        nddev_device_sync_rds::Error::Io(error) => io_error(error),
-        nddev_device_sync_rds::Error::Protocol => AgentError::InvalidResponse,
-        nddev_device_sync_rds::Error::UnsupportedPlatform => AgentError::UnsupportedPlatform,
+        nddev_device_sync_remote::Error::Io(error) => io_error(error),
+        nddev_device_sync_remote::Error::Protocol => AgentError::InvalidResponse,
+        nddev_device_sync_remote::Error::UnsupportedPlatform => AgentError::UnsupportedPlatform,
     }
 }
 
@@ -1614,11 +1614,13 @@ mod tests {
                 .unwrap();
             assert!(status.ready);
             assert_eq!(status.port, peer.base.port());
+            // A managed file naming another port is visible but not in force
+            // for the supplied base; the client reports exact bindings only.
             assert!(
                 status
                     .bindings
                     .iter()
-                    .any(|binding| binding.kind == "cargo" && binding.bound)
+                    .any(|binding| binding.kind == "cargo" && !binding.bound)
             );
             assert_eq!(files(root.path()), before);
         }
@@ -2045,8 +2047,8 @@ mod tests {
             clipboard: None,
             cleaner: None,
             updater: None,
-            gds: None,
-            rds: None,
+            github: None,
+            remote: None,
             browser: Some(
                 BrowserUseClient::new(
                     NativeIo::new(1).unwrap().local_handle(),
@@ -2701,13 +2703,13 @@ mod tests {
             panic!("unsupported manifest platform entered adapter I/O")
         });
         assert!(matches!(
-            agent.observe("gds", |_| work).await,
+            agent.observe("github", |_| work).await,
             Err(AgentError::UnsupportedPlatform)
         ));
         let state = agent
             .modules()
             .into_iter()
-            .find(|module| module.id == "gds")
+            .find(|module| module.id == "github")
             .unwrap();
         assert!(
             state.reachability == Reachability::NotChecked

@@ -1,5 +1,5 @@
 # std-0001 repository manifest — schema: `nddev schema manifest`.
-apiVersion: nddev.ai/v1alpha3
+apiVersion: nddev.ai/v1alpha4
 kind: Repository
 metadata:
   id: nddev-device-sync-agent
@@ -8,7 +8,6 @@ metadata:
 spec:
   standard:
     id: std-0001
-    version: 3.0.0
   role: component
   profiles:
   - rust
@@ -21,25 +20,14 @@ spec:
   - name: adapter-io
     source: crates/io
     direction: code-first
-  variations:
-  - paths: [.gds]
-    purpose: config
-    reason: GDS-owned repository anchor and policy projections, excluded from std-0001 tooling per its boundary rule.
-    decision: {state: approved, by: rldyourmnd, date: "2026-10-22", origin: document, reference: standarts/decisions/0013-estate-hygiene-and-standards-adoption.md}
-  - paths: [module.yaml]
-    purpose: manifest
-    reason: NDS module descriptor owned by the product standards corpus.
-    decision: {state: approved, by: rldyourmnd, date: "2026-10-22", origin: document, reference: standarts/decisions/0013-estate-hygiene-and-standards-adoption.md}
-  - paths: [standarts.lock]
-    purpose: lock
-    reason: NDS contract lock pinning the standards source.
-    decision: {state: approved, by: rldyourmnd, date: "2026-10-22", origin: document, reference: standarts/decisions/0013-estate-hygiene-and-standards-adoption.md}
-  - paths: [.config]
-    purpose: tool-config
-    reason: Pinned nextest CI profile configuration owned by the repository.
-    decision: {state: approved, by: rldyourmnd, date: "2026-10-22", origin: document, reference: standarts/decisions/0013-estate-hygiene-and-standards-adoption.md}
   modules:
   - .
+  adaptations:
+  - docs/decisions/0001-nds-contract-locations.md
+  extensions:
+    nddev.standards-system:
+      standards:
+      - std-0001
   adapters:
   - claude
   - cursor

@@ -21,9 +21,9 @@ allow-git = [
     "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-cleaner",
     "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-clipboard",
     "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-core",
-    "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds",
+    "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-github",
     "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-observability",
-    "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-rds",
+    "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-remote",
     "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-sysinfo",
     "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-updater",
 ]

@@ -1,7 +1,7 @@
 //! Composition verifies the fixed worker delivered with the NDS host artifact.
 //! Build tooling embeds its digest; no runtime environment or presentation input
 //! can select an executable or change the expected bytes.
-use crate::{GDS_WORKER_MAX_BYTES, view::AgentError};
+use crate::{GITHUB_WORKER_MAX_BYTES, view::AgentError};
 use sha2::{Digest, Sha256};
 use std::{
     io::Read,
@@ -9,13 +9,13 @@ use std::{
 };
 
 pub const WORKER_NAME: &str = if cfg!(windows) {
-    "nds-gds-readonly-worker.exe"
+    "nds-github-readonly-worker.exe"
 } else {
-    "nds-gds-readonly-worker"
+    "nds-github-readonly-worker"
 };
 
 pub(crate) fn bundled_git_worker() -> Result<Option<PathBuf>, AgentError> {
-    let Some(expected) = option_env!("NDS_GDS_WORKER_SHA256") else {
+    let Some(expected) = option_env!("NDS_GITHUB_WORKER_SHA256") else {
         return Ok(None);
     };
     let host = std::env::current_exe().map_err(|_| AgentError::Unavailable)?;
@@ -40,7 +40,7 @@ fn resolve(host: &Path, expected: &str) -> Result<Option<PathBuf>, AgentError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err(AgentError::Unavailable),
     };
-    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > GDS_WORKER_MAX_BYTES {
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > GITHUB_WORKER_MAX_BYTES {
         return Err(AgentError::InvalidContract);
     }
     #[cfg(unix)]
@@ -62,7 +62,7 @@ fn resolve(host: &Path, expected: &str) -> Result<Option<PathBuf>, AgentError> {
         count = count
             .checked_add(bytes as u64)
             .ok_or(AgentError::InvalidContract)?;
-        if count > GDS_WORKER_MAX_BYTES {
+        if count > GITHUB_WORKER_MAX_BYTES {
             return Err(AgentError::InvalidContract);
         }
         hash.update(&chunk[..bytes]);
@@ -113,7 +113,7 @@ mod tests {
             .write(true)
             .open(root.path().join(WORKER_NAME))
             .unwrap()
-            .set_len(GDS_WORKER_MAX_BYTES + 1)
+            .set_len(GITHUB_WORKER_MAX_BYTES + 1)
             .unwrap();
         assert!(matches!(
             resolve(&host, &digest),
