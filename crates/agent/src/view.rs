@@ -10,7 +10,7 @@ pub use nddev_device_sync_browser_use::{
 pub use nddev_device_sync_cache_client::{Error as CacheError, view as cache};
 pub use nddev_device_sync_cleaner::view as cleaner;
 pub use nddev_device_sync_clipboard::view as clipboard;
-pub use nddev_device_sync_gds::view as gds;
-pub use nddev_device_sync_rds::view as rds;
+pub use nddev_device_sync_github::view as github;
+pub use nddev_device_sync_remote::view as remote;
 pub use nddev_device_sync_sysinfo::view as sysinfo;
 pub use nddev_device_sync_updater::view as updater;

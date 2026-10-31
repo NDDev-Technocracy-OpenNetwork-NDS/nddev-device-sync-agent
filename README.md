@@ -3,7 +3,7 @@
 AGPL-3.0-only native integration for NDS. [NDDev OpenNetwork](https://nddev.ai).
 
 `crates/agent` composes eight compiled-in native module clients: sysinfo,
-clipboard, cleaner, updater, GDS, RDS, browser-use and cache. Each module owns
+clipboard, cleaner, updater, github, remote, browser-use and cache. Each module owns
 its manifest and functional contract; I/O adapters remain internal boundaries. The Flutter client calls the library to read actual native state;
 configuration, untested reachability and a completed observation are distinct.
 Mobile consumers share portable view types; local native tools require a
@@ -46,7 +46,7 @@ NDS synchronization; selecting it grants neither device permissions nor GitHub
 access. Conflicted settings remain blocked.
 
 `github repositories` lists bounded saved metadata without polling GitHub.
-`github write enable` explicitly enables this device's GDS and its required
+`github write enable` explicitly enables this device's GitHub module and its required
 read/credential/network and `git_write` permissions; `github write disable`
 withdraws only Git write consent and preserves existing files/settings.
 `github connect <repository_id> <owner_id> <owner> <repository>` uses that grant
@@ -58,10 +58,10 @@ proof of subsequent commit synchronization. This command installs no daemon and
 does not activate periodic Git writes; registered intent uses ordinary NDS sync.
 
 `sync run` keeps the existing Rust replica owner alive until Ctrl-C or a native
-termination signal. It resumes queued NDS synchronization and the permitted GDS
+termination signal. It resumes queued NDS synchronization and the permitted GitHub module
 catalog without a GUI. Another process observing the same local account follows
 the elected owner and takes over after it exits. It installs no service; ordinary
-point-of-use CLI commands remain bounded and do not start catalog polling. GDS
+point-of-use CLI commands remain bounded and do not start catalog polling. GitHub module
 provider failures are observed separately from Vault replication. No Git clone,
 commit creation or automatic Git mutation is activated by this command.
 
@@ -79,11 +79,11 @@ With a shared mutable Cargo cache, native acceptance can use
 `NDS_TEST_CLI_BINARY` to select an absolute frozen CLI artifact whose source
 and digest were verified before the run.
 
-Linux GDS uses the bundled Rust worker from the locked GDS dependency and the
+The Linux GitHub module uses the bundled Rust worker from its locked dependency and the
 native module graph's IO341 process owner. Build it with
-`cargo run --locked -p nddev-device-sync-agent --bin nds-package-gds-worker --
+`cargo run --locked -p nddev-device-sync-agent --bin nds-package-github-worker --
 --bundle <absolute-staging-directory>`. Use the receipt's actual
-`NDS_GDS_WORKER_SHA256` for the host build and deliver the fixed worker beside
+`NDS_GITHUB_WORKER_SHA256` for the host build and deliver the fixed worker beside
 the host. Downstream Flutter packaging must also track that digest in hook
 user_defines so warm caches cannot retain another worker identity.
 
@@ -91,7 +91,7 @@ The agent admits only that fixed sibling with bounded streaming hash checks.
 Runtime PATH/environment and presentation input cannot choose its executable
 or expected hash. Verification uses the existing trusted installation boundary;
 hash followed by execution through a path is not race-free attestation.
-Unpackaged Linux builds leave GDS unconfigured. macOS/Windows GDS refuses
+Unpackaged Linux builds leave the GitHub module unconfigured. On macOS/Windows it refuses
 execution until its native resource boundary is qualified; other module support
 is unchanged. Provider acceptance runs only owned temporary copies and daemons.
 

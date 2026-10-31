@@ -20,16 +20,16 @@ fn package(mismatched_manifest: bool, managed: bool) {
                 "metadata": {
             "target_directory":root.join("uninitialized-managed-target"),
             "packages":[{
-                "name":"nddev-device-sync-gds", "version":"0.0.1-alpha.7",
-                "source":format!("git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds?rev={}#{}","a".repeat(40),"a".repeat(40)),
+                "name":"nddev-device-sync-github", "version":"0.0.1-alpha.7",
+                "source":format!("git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-github?rev={}#{}","a".repeat(40),"a".repeat(40)),
                 "manifest_path":manifest,
-                "targets":[{"name":"nds-gds-readonly-worker"}]
+                "targets":[{"name":"nds-github-readonly-worker"}]
             }]
         },
         "artifact": {
             "reason":"compiler-artifact",
             "manifest_path":if mismatched_manifest {&other} else {&manifest},
-            "target":{"name":"nds-gds-readonly-worker","kind":["bin"]},
+            "target":{"name":"nds-github-readonly-worker","kind":["bin"]},
             "executable":artifact
         }
     })).unwrap()).unwrap();
@@ -50,7 +50,7 @@ else:
             assert name not in os.environ
     else:
         target = sys.argv[sys.argv.index('--target-dir') + 1]
-        assert target.startswith(fixture['metadata']['target_directory'] + '/providers/gds/')
+        assert target.startswith(fixture['metadata']['target_directory'] + '/providers/github/')
         assert os.environ['CARGO_BUILD_BUILD_DIR'] == target + '/build'
     assert '--locked' in sys.argv and '--release' in sys.argv
     assert '--message-format=json-render-diagnostics' in sys.argv
@@ -61,7 +61,7 @@ else:
     .unwrap();
     fs::set_permissions(&cargo, fs::Permissions::from_mode(0o700)).unwrap();
     let bundle = root.join("bundle");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_nds-package-gds-worker"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_nds-package-github-worker"));
     if managed {
         command.env("NDS_CACHE_FRONTENDS", root);
     } else {
@@ -76,11 +76,11 @@ else:
         .env("CARGO_BUILD_BUILD_DIR", root.join("parent-build"))
         .output()
         .unwrap();
-    let staged = bundle.join("nds-gds-readonly-worker");
+    let staged = bundle.join("nds-github-readonly-worker");
     if mismatched_manifest {
         assert!(!result.status.success());
         assert!(!staged.exists());
-        assert!(!bundle.join("nds-gds-worker.build.json").exists());
+        assert!(!bundle.join("nds-github-worker.build.json").exists());
     } else {
         assert!(
             result.status.success(),
@@ -94,7 +94,7 @@ else:
             base16ct::lower::encode_string(&Sha256::digest(bytes))
         );
         assert_eq!(
-            receipt["host_build_environment"]["NDS_GDS_WORKER_SHA256"],
+            receipt["host_build_environment"]["NDS_GITHUB_WORKER_SHA256"],
             receipt["sha256"]
         );
         assert_eq!(

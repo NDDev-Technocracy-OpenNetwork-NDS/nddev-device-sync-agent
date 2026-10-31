@@ -3,7 +3,7 @@
 pub mod view;
 
 /// Bound shared by artifact packaging and native worker admission.
-pub const GDS_WORKER_MAX_BYTES: u64 = 128 * 1024 * 1024;
+pub const GITHUB_WORKER_MAX_BYTES: u64 = 128 * 1024 * 1024;
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod native;
@@ -22,8 +22,8 @@ pub fn module_graph() -> Result<nddev_device_sync_domain::ModuleGraph, view::Age
         nddev_device_sync_clipboard::MANIFEST,
         nddev_device_sync_cleaner::MANIFEST,
         nddev_device_sync_updater::MANIFEST,
-        nddev_device_sync_gds::MANIFEST,
-        nddev_device_sync_rds::MANIFEST,
+        nddev_device_sync_github::MANIFEST,
+        nddev_device_sync_remote::MANIFEST,
         nddev_device_sync_browser_use::MANIFEST,
         nddev_device_sync_cache_client::MANIFEST,
     ] {
@@ -95,7 +95,7 @@ mod tests {
         );
         assert_eq!(
             owner["dependencies"],
-            serde_json::json!([{"id":"rds","minimum_api":1}])
+            serde_json::json!([{"id":"remote","minimum_api":1}])
         );
         let missing = Configuration {
             enabled: true,
