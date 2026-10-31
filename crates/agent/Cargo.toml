@@ -23,8 +23,8 @@ nddev-device-sync-sysinfo = { version = "=0.0.1-alpha.1", git = "https://github.
 nddev-device-sync-clipboard = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-clipboard", rev = "c765907183039442fc6f05a78c76a9941e2e8230" }
 nddev-device-sync-cleaner = { version = "=0.0.1-alpha.2", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-cleaner", rev = "5b3f3e92d6ea7b18dfe2c2ab89f1828a0329339f" }
 nddev-device-sync-updater = { version = "=0.0.1-alpha.1", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-updater", rev = "9503dbe004939dc3d3b4c23f452c9f87097896b7" }
-nddev-device-sync-gds = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds", rev = "218685c4bdeddf4c0586ddc8214030efafd383cd" }
-nddev-device-sync-rds = { version = "=0.0.1-alpha.2", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-rds", rev = "bed667ef0685ed4a650756286053ad82e691df8b" }
+nddev-device-sync-gds = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-gds", rev = "609a81921987c8962d25b6e87b4850a387f04157" }
+nddev-device-sync-rds = { version = "=0.0.1-alpha.2", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-rds", rev = "1357a92366bafeda68307dee21ee15f5e153af47" }
 
 [dev-dependencies]
 tempfile = "3"
