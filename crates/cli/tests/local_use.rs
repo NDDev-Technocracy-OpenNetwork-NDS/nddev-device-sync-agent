@@ -212,13 +212,15 @@ async fn the_bridge_keeps_the_original_authority_until_it_changes() {
     let logs = String::from_utf8_lossy(&logs);
     let email = data["owner_email"].as_str().unwrap();
     assert!(!logs.contains(email) && !logs.contains(root.to_str().unwrap()));
+    // The same ADR 0018 records Shared emits, correlated by this operation and device.
     for name in [
-        "module.admission.admitted",
-        "module.action.validated",
-        "module.action.refused",
+        "module.admission.fullauto",
+        "module.admission.manual",
+        "module.action.failed",
     ] {
         assert!(logs.contains(name), "{name} was not emitted");
     }
+    assert!(logs.contains(&operation) && logs.contains(view.current_device_id.as_str()));
     if let Ok(path) = std::env::var("NDS_TEST_CLI_EVIDENCE_FILE") {
         let path = std::path::PathBuf::from(path).with_extension("local-use.jsonl");
         assert!(path.is_absolute() && !path.starts_with(env!("CARGO_MANIFEST_DIR")));

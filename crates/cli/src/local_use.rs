@@ -73,32 +73,61 @@ fn admit(configuration: &Configuration, mode: ControlMode) -> Result<(), &'stati
 
 impl Basis {
     /// Rechecks the original fence, the current device policy and the tool's admission.
-    /// Returns the policy revision the answer was decided under.
-    async fn check(&self) -> Result<u64, &'static str> {
+    /// Returns the policy revision and mode the answer was decided under; a refusal names the mode
+    /// when the policy could be read.
+    async fn check(&self) -> Result<(u64, ControlMode), (&'static str, Option<ControlMode>)> {
+        let fence = |error| (client_class(error), None);
         self.identity
             .validate_local_use(&self.fence)
             .await
-            .map_err(client_class)?;
+            .map_err(fence)?;
         let policy = self
             .identity
             .device_policy(&self.fence)
             .await
-            .map_err(client_class)?;
+            .map_err(fence)?;
+        let mode = Some(policy.mode());
         let setting = self
             .vault
             .module_configuration(self.tool)
             .await
-            .map_err(vault_class)?;
+            .map_err(|error| (vault_class(error), mode))?;
         if setting.conflicted {
-            return Err("module_configuration_conflict");
+            return Err(("module_configuration_conflict", mode));
         }
-        admit(&setting.configuration, policy.mode())?;
+        admit(&setting.configuration, policy.mode()).map_err(|class| (class, mode))?;
         // The answer must not outlive a sign-out or replacement during these reads.
         self.identity
             .validate_local_use(&self.fence)
             .await
-            .map_err(client_class)?;
-        Ok(policy.revision())
+            .map_err(fence)?;
+        Ok((policy.revision(), policy.mode()))
+    }
+}
+
+struct Context {
+    tool: &'static str,
+    operation: String,
+    user: String,
+    device: String,
+}
+
+/// The ADR 0018 admission record Shared also emits: original principal, device, operation and the
+/// deciding mode; never configuration, paths or arguments.
+fn admission_event(context: &Context, mode: Option<ControlMode>, refusal: Option<&'static str>) {
+    let event = match mode {
+        Some(ControlMode::Fullauto) => "module.admission.fullauto",
+        Some(ControlMode::Manual) => "module.admission.manual",
+        None => "module.admission.unavailable",
+    };
+    let module = context.tool;
+    match refusal {
+        None => {
+            tracing::info!(event.name = event, module, device.id = %context.device, user.id = %context.user, operation.id = %context.operation, outcome = "accepted")
+        }
+        Some(class) => {
+            tracing::warn!(event.name = event, module, device.id = %context.device, user.id = %context.user, operation.id = %context.operation, error.type = class, outcome = "denied")
+        }
     }
 }
 
@@ -169,16 +198,22 @@ pub async fn run(
         tool,
     };
     let operation_id = uuid::Uuid::new_v4().to_string();
-    let admitted = basis.check().await;
-    match &admitted {
-        Ok(_) => {
-            tracing::info!(event.name = "module.admission.admitted", module = tool, operation.id = %operation_id, outcome = "ok")
+    let context = Context {
+        tool,
+        operation: operation_id.clone(),
+        user: view.user_id.clone(),
+        device: view.current_device_id.clone(),
+    };
+    let revision = match basis.check().await {
+        Ok((revision, mode)) => {
+            admission_event(&context, Some(mode), None);
+            revision
         }
-        Err(class) => {
-            tracing::warn!(event.name = "module.admission.refused", module = tool, operation.id = %operation_id, error.type = *class, outcome = "rejected")
+        Err((class, mode)) => {
+            admission_event(&context, mode, Some(class));
+            return Err(class);
         }
-    }
-    let revision = admitted?;
+    };
     frame(&json!({
         "frame": "ready",
         "operation_id": operation_id,
@@ -202,15 +237,14 @@ pub async fn run(
             Ok(None) => break "cancelled",
             Ok(Some(line)) if line == "close" => break "closed",
             Ok(Some(line)) if line == "validate" => {
-                let checked = basis.check().await;
-                let reply = match checked {
-                    Ok(revision) => {
+                let reply = match basis.check().await {
+                    Ok((revision, mode)) => {
                         validated += 1;
-                        tracing::info!(event.name = "module.action.validated", module = tool, operation.id = %operation_id, outcome = "ok");
+                        admission_event(&context, Some(mode), None);
                         json!({"frame": "valid", "operation_id": operation_id, "policy_revision": revision.to_string()})
                     }
-                    Err(class) => {
-                        tracing::warn!(event.name = "module.action.refused", module = tool, operation.id = %operation_id, error.type = class, outcome = "rejected");
+                    Err((class, mode)) => {
+                        admission_event(&context, mode, Some(class));
                         json!({"frame": "refused", "operation_id": operation_id, "error": class})
                     }
                 };
@@ -225,7 +259,13 @@ pub async fn run(
             Err(error) => return Err(error),
         }
     };
-    tracing::info!(event.name = "module.action.ended", module = tool, operation.id = %operation_id, outcome = if ended == "closed" { "ok" } else { "stopped" });
+    // The tool reports its own action; the bridge reports how the operation's authority ended.
+    let module = tool;
+    if ended == "closed" {
+        tracing::info!(event.name = "module.action.completed", module, device.id = %context.device, user.id = %context.user, operation.id = %context.operation, outcome = "ok");
+    } else {
+        tracing::warn!(event.name = "module.action.failed", module, device.id = %context.device, user.id = %context.user, operation.id = %context.operation, error.type = ended, outcome = "error");
+    }
     Ok(json!({
         "operation": "local_use",
         "operation_id": operation_id,

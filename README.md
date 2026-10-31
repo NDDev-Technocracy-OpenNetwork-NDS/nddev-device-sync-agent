@@ -80,8 +80,10 @@ and the last line is the operation result. The tool holds its own publication lo
 from a `valid` frame through its commit and publishes nothing after any other
 reply or EOF; a frame observes that moment and grants nothing beyond the process.
 The child needs an enrolled device session and an unlocked Vault on the host; it
-adds no daemon, listener or token. Events `module.admission.*` and
-`module.action.*` carry the module and operation id, never paths or arguments.
+adds no daemon, listener or token. It emits the ADR 0018 records Shared emits:
+`module.admission.fullauto|manual` (`accepted`/`denied` with a fixed class) for each
+check and `module.action.completed|failed` when the operation's authority ends, with
+device, principal and operation id, never configuration, paths or arguments.
 Native acceptance (`cargo test -p nds-agent --test local_use -- --ignored`) runs
 against an owned PG/SMTP fixture.
 
