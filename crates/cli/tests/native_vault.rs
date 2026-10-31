@@ -118,15 +118,15 @@ async fn background_handoff(
 ) {
     use nddev_device_sync_domain::modules::control::Configuration;
     use std::process::Stdio;
-    let setting = vault.module_configuration("gds").await.unwrap();
+    let setting = vault.module_configuration("github").await.unwrap();
     vault
         .set_module_configuration(
-            "gds".into(),
+            "github".into(),
             setting.revision,
             setting.pending_id,
             Configuration {
                 enabled: true,
-                permissions: nddev_device_sync_gds::catalog_runtime::required_permissions(),
+                permissions: nddev_device_sync_github::catalog_runtime::required_permissions(),
             },
         )
         .await
@@ -155,16 +155,16 @@ async fn background_handoff(
                         .windows(secret.len())
                         .any(|value| value == secret.as_bytes())
                 );
-                let observed = if event == b"gds.catalog.read.failed" {
+                let observed = if event == b"github.catalog.read.failed" {
                     let rows = logs
                         .split(|byte| *byte == b'\n')
                         .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
                         .collect::<Vec<_>>();
                     rows.iter()
-                        .filter(|row| row["event.name"] == "gds.catalog.read.failed")
+                        .filter(|row| row["event.name"] == "github.catalog.read.failed")
                         .any(|http| {
                             rows.iter().any(|page| {
-                                page["event.name"] == "gds.catalog.page.read"
+                                page["event.name"] == "github.catalog.page.read"
                                     && page["error.type"] == "dependency_unavailable"
                                     && http["trace_id"].is_string()
                                     && page["trace_id"] == http["trace_id"]
@@ -207,7 +207,7 @@ async fn background_handoff(
         value
     }
     fn refused_or_unobserved(stopped: &Value) {
-        let observation = stopped.get("gds").expect("missing catalog observation");
+        let observation = stopped.get("github").expect("missing catalog observation");
         // Health is conditional on the current protected source/configuration
         // read. Absence is unknown, never successful provider readiness. The
         // correlated real provider refusal is required separately above.
@@ -219,7 +219,7 @@ async fn background_handoff(
         );
     }
     let (owner, owner_log) = spawn("owner");
-    wait_for(&owner_log, b"gds.catalog.read.failed", secret).await;
+    wait_for(&owner_log, b"github.catalog.read.failed", secret).await;
     let (follower, follower_log) = spawn("follower");
     wait_for(&follower_log, b"agent.sync.started", secret).await;
     // Let the follower execute at least one actual lease/replication batch.
@@ -227,13 +227,13 @@ async fn background_handoff(
     assert!(
         !std::fs::read(&follower_log)
             .unwrap()
-            .windows(b"gds.catalog.read.failed".len())
-            .any(|v| v == b"gds.catalog.read.failed")
+            .windows(b"github.catalog.read.failed".len())
+            .any(|v| v == b"github.catalog.read.failed")
     );
     let stopped = stop(owner, "-TERM").await;
     refused_or_unobserved(&stopped);
     // A separate process can now become owner, without logging out or changing keys.
-    wait_for(&follower_log, b"gds.catalog.read.failed", secret).await;
+    wait_for(&follower_log, b"github.catalog.read.failed", secret).await;
     let stopped = stop(follower, "-INT").await;
     refused_or_unobserved(&stopped);
     // A retained resource cannot acquire a fresh local-use generation after its
@@ -246,13 +246,13 @@ async fn background_handoff(
     .await
     .unwrap();
     let catalog = native
-        .catalog(nddev_device_sync_gds::catalog_runtime::CatalogRuntime::new)
+        .catalog(nddev_device_sync_github::catalog_runtime::CatalogRuntime::new)
         .unwrap();
     let foreground = catalog.foreground(identity.clone());
     let refusal = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             match foreground.github_repository_page(false).await {
-                Err(nddev_device_sync_gds::catalog_runtime::view::GithubCatalogError::Busy) => {
+                Err(nddev_device_sync_github::catalog_runtime::view::GithubCatalogError::Busy) => {
                     tokio::time::sleep(Duration::from_millis(100)).await
                 }
                 value => break value,
@@ -263,13 +263,13 @@ async fn background_handoff(
     .unwrap();
     assert!(matches!(
         refusal,
-        Err(nddev_device_sync_gds::catalog_runtime::view::GithubCatalogError::Unavailable)
+        Err(nddev_device_sync_github::catalog_runtime::view::GithubCatalogError::Unavailable)
     ));
     assert!(catalog.observation().await.unwrap().error.is_some());
-    let setting = vault.module_configuration("gds").await.unwrap();
+    let setting = vault.module_configuration("github").await.unwrap();
     vault
         .set_module_configuration(
-            "gds".into(),
+            "github".into(),
             setting.revision,
             setting.pending_id,
             Configuration {
@@ -289,14 +289,14 @@ async fn background_handoff(
     assert!(matches!(
         foreground.saved_github_repository_page(false).await,
         Err(
-            nddev_device_sync_gds::catalog_runtime::view::GithubCatalogError::AuthorizationRequired
+            nddev_device_sync_github::catalog_runtime::view::GithubCatalogError::AuthorizationRequired
         )
     ));
     let replacement = catalog.foreground(identity.clone());
     assert!(matches!(
         replacement.github_repository_page(false).await,
         Err(
-            nddev_device_sync_gds::catalog_runtime::view::GithubCatalogError::AuthorizationRequired
+            nddev_device_sync_github::catalog_runtime::view::GithubCatalogError::AuthorizationRequired
         )
     ));
     let raced = nddev_device_sync_vault::replication::native::NativeReplica::attach(
@@ -309,7 +309,7 @@ async fn background_handoff(
     assert!(matches!(
         raced.catalog(|owner, vault| {
             owner.cancel();
-            nddev_device_sync_gds::catalog_runtime::CatalogRuntime::new(owner, vault)
+            nddev_device_sync_github::catalog_runtime::CatalogRuntime::new(owner, vault)
         }),
         Err(nddev_device_sync_vault::Error::Locked)
     ));
@@ -624,7 +624,7 @@ async fn actual_native_vault_reference_drives_official_github_cli() {
         )
         .await;
         assert!(!success);
-        assert_eq!(denied["error"], "gds_unavailable");
+        assert_eq!(denied["error"], "github_unavailable");
         let (success, withdrawn) = actual_cli(
             endpoint,
             &["github", "write", "disable"],

@@ -21,11 +21,11 @@ metadata = subprocess.run(
 bundle = Path(json.loads(metadata.stdout)["target_directory"]) / "agent-worker-fixture"
 artifact = subprocess.run(
     ["cargo", "run", "--locked", "-p", "nddev-device-sync-agent", "--bin",
-     "nds-package-gds-worker", "--", "--bundle", str(bundle)],
+     "nds-package-github-worker", "--", "--bundle", str(bundle)],
     cwd=root, text=True, capture_output=True, check=True, timeout=300,
 )
 receipt = json.loads(artifact.stdout.splitlines()[-1])
-worker = bundle / "nds-gds-readonly-worker"
+worker = bundle / "nds-github-readonly-worker"
 build_environment = {**os.environ, **receipt["host_build_environment"]}
 build = subprocess.run(
     ["cargo", "test", "--locked", "-p", "nddev-device-sync-agent", "--test", "lifecycle",
@@ -68,7 +68,7 @@ with tempfile.TemporaryDirectory(prefix="nds-agent-provider-") as temporary:
                        env=environment, check=True, timeout=30)
         subprocess.run([str(executable), "--ignored", "cached_missing_provider_is_not_a_fresh_native_observation"],
                        env={**environment, "PATH": ""}, check=True, timeout=30)
-        subprocess.run([str(executable), "--ignored", "native_gds_query_uses_core_observation_and_projection"],
+        subprocess.run([str(executable), "--ignored", "native_github_query_uses_core_observation_and_projection"],
                        env=environment, check=True, timeout=30)
         # Invalid owned copies must fail before execution, even with an executable
         # named gds in PATH and a runtime attempt to replace the embedded digest.
@@ -99,10 +99,10 @@ with tempfile.TemporaryDirectory(prefix="nds-agent-provider-") as temporary:
                     with owned_worker.open("r+b") as handle:
                         handle.truncate(128 * 1024 * 1024 + 1)
                 subprocess.run(
-                    [str(owned_host), "--ignored", "gds_worker_admission_has_no_path_fallback"],
+                    [str(owned_host), "--ignored", "github_worker_admission_has_no_path_fallback"],
                     env={**environment, "PATH":str(path_dir), "NDS_INVALID_WORKER":case,
-                         "NDS_GDS_EXECUTION_MARKER":str(marker),
-                         "NDS_GDS_WORKER_SHA256":hashlib.sha256(fake).hexdigest()},
+                         "NDS_GITHUB_EXECUTION_MARKER":str(marker),
+                         "NDS_GITHUB_WORKER_SHA256":hashlib.sha256(fake).hexdigest()},
                     check=True, timeout=15)
                 if marker.exists():
                     raise RuntimeError("invalid/fallback worker executed")

@@ -1,3 +1,3 @@
 fn main() {
-    println!("cargo:rerun-if-env-changed=NDS_GDS_WORKER_SHA256");
+    println!("cargo:rerun-if-env-changed=NDS_GITHUB_WORKER_SHA256");
 }

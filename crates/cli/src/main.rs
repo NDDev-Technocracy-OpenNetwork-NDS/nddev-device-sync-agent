@@ -17,19 +17,19 @@ struct CommandReply {
     durable: bool,
 }
 fn catalog_error(
-    error: nddev_device_sync_gds::catalog_runtime::view::GithubCatalogError,
+    error: nddev_device_sync_github::catalog_runtime::view::GithubCatalogError,
 ) -> &'static str {
-    use nddev_device_sync_gds::catalog_runtime::view::GithubCatalogError as E;
+    use nddev_device_sync_github::catalog_runtime::view::GithubCatalogError as E;
     match error {
         E::InvalidInput => "invalid_arguments",
         E::AuthorizationRequired => "sign_in_required",
-        E::CredentialChanged => "gds_source_changed",
-        E::Busy => "gds_busy",
-        E::Cancelled => "gds_cancelled",
-        E::Timeout => "gds_timeout",
-        E::Unavailable => "gds_unavailable",
-        E::ProviderFailed => "gds_provider_failed",
-        E::InvalidResponse => "gds_invalid_response",
+        E::CredentialChanged => "github_source_changed",
+        E::Busy => "github_busy",
+        E::Cancelled => "github_cancelled",
+        E::Timeout => "github_timeout",
+        E::Unavailable => "github_unavailable",
+        E::ProviderFailed => "github_provider_failed",
+        E::InvalidResponse => "github_invalid_response",
         E::CapacityExhausted => "sync_capacity_exhausted",
         E::ModuleDisabled => "module_disabled",
         E::ModulePermissionRequired => "module_permission_required",
@@ -148,7 +148,7 @@ async fn operation(
         });
         if scope == "sync" && command == "run" {
             replica
-                .catalog(nddev_device_sync_gds::catalog_runtime::CatalogRuntime::new)
+                .catalog(nddev_device_sync_github::catalog_runtime::CatalogRuntime::new)
                 .map_err(|_| "vault_unavailable")?;
             if !remaining.is_empty() {
                 return Err("invalid_arguments");
@@ -210,7 +210,7 @@ async fn operation(
         // Bounded point use starts no collector task, including cache listing.
         // The same concrete Rust composition owns its original caller; the
         // existing NativeReplica remains responsible for background sync only.
-        let catalog = nddev_device_sync_gds::catalog_runtime::CatalogRuntime::new(
+        let catalog = nddev_device_sync_github::catalog_runtime::CatalogRuntime::new(
             identity.clone(),
             vault.clone(),
         );
@@ -222,11 +222,11 @@ async fn operation(
                 Permission, modules::control::Configuration,
                 repositories::workspace::write_permissions,
             };
-            if !nddev_device_sync_gds::catalog_runtime::workspace_supported() {
+            if !nddev_device_sync_github::catalog_runtime::workspace_supported() {
                 return Err("unsupported_platform");
             }
             let setting = vault
-                .module_configuration("gds")
+                .module_configuration("github")
                 .await
                 .map_err(source_error)?;
             if setting.conflicted {
@@ -246,7 +246,7 @@ async fn operation(
                 .map_err(|_| "invalid_arguments")?;
             let receipt = vault
                 .set_module_configuration_attempt(
-                    "gds".into(),
+                    "github".into(),
                     setting.revision,
                     setting.pending_id,
                     Configuration {
@@ -316,7 +316,7 @@ async fn operation(
                 }
                 next = true;
             }
-            Err("gds_capacity_exhausted")
+            Err("github_capacity_exhausted")
         }
         ("github", "source", []) => {
             let source = vault.github_source().await.map_err(source_error)?;
@@ -344,7 +344,7 @@ async fn operation(
             };
             let source = vault.github_source().await.map_err(source_error)?;
             if source.conflicted {
-                return Err("gds_source_conflict");
+                return Err("github_source_conflict");
             }
             let receipt = vault
                 .set_github_source(selection, source.revision, source.pending_id)
@@ -433,14 +433,14 @@ async fn stop_signal() -> std::io::Result<()> {
 /// Observes the existing owner; this is not another replication scheduler.
 async fn run_owner(owner: &Arc<NativeReplica>) -> Result<Value, &'static str> {
     let catalog = owner
-        .catalog(nddev_device_sync_gds::catalog_runtime::CatalogRuntime::new)
+        .catalog(nddev_device_sync_github::catalog_runtime::CatalogRuntime::new)
         .map_err(|_| "vault_unavailable")?;
     let mut updates = owner.updates().map_err(|_| "vault_unavailable")?;
     let stop = stop_signal();
     tokio::pin!(stop);
     tracing::info!(
         event.name = "agent.sync.started",
-        module = "gds",
+        module = "github",
         outcome = "ok"
     );
     loop {
@@ -481,7 +481,7 @@ async fn main() {
             "nds_accounts".into(),
             "nddev_device_sync_vault".into(),
             "nddev_device_sync_adapter_io".into(),
-            "nddev_device_sync_gds".into(),
+            "nddev_device_sync_github".into(),
         ],
         default_module: "agent".into(),
         debug: None,
@@ -536,7 +536,7 @@ async fn main() {
             match run_owner(owner).await {
                 Ok(observation) => {
                     reply.value["stopped"] = json!(true);
-                    reply.value["gds"] = observation;
+                    reply.value["github"] = observation;
                 }
                 Err(error) => result = Err(error),
             }
