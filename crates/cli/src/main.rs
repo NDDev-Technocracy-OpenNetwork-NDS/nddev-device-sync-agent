@@ -34,6 +34,8 @@ fn catalog_error(
         E::ModuleDisabled => "module_disabled",
         E::ModulePermissionRequired => "module_permission_required",
         E::ModuleConfigurationConflict => "module_configuration_conflict",
+        E::AccountIgnored => "account_ignored",
+        E::IgnoreListInvalid => "ignore_list_invalid",
     }
 }
 impl From<Value> for CommandReply {
@@ -308,7 +310,7 @@ async fn operation(
                     .map_err(catalog_error)?;
                 for group in page.groups {
                     for item in group.repositories {
-                        repositories.push(json!({"id":item.repository.id,"owner_id":group.owner_id,"owner":group.owner.as_ref().map(|value|value.owner.login.as_str()),"name":item.repository.name,"conflicted":item.observation.conflicted,"pending":item.observation.pending,"observed_at_ms":item.observation.observed_at_ms,"synchronization":item.synchronization.map(|value|json!({"outcome":value.outcome,"reason":value.reason,"observed_at_ms":value.observed_at_ms}))}));
+                        repositories.push(json!({"id":item.repository.id,"owner_id":group.owner_id,"owner":group.owner.as_ref().map(|value|value.owner.login.as_str()),"ignored":group.ignored,"name":item.repository.name,"conflicted":item.observation.conflicted,"pending":item.observation.pending,"observed_at_ms":item.observation.observed_at_ms,"synchronization":item.synchronization.map(|value|json!({"outcome":value.outcome,"reason":value.reason,"observed_at_ms":value.observed_at_ms}))}));
                     }
                 }
                 if !page.has_more {
