@@ -18,7 +18,7 @@ env:
 
 jobs:
   contract:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -55,7 +55,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2022]
+        os: [ubuntu-26.04, macos-15, windows-2022]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
