@@ -87,6 +87,25 @@ device, principal and operation id, never configuration, paths or arguments.
 Native acceptance (`cargo test -p nds-agent --test local_use -- --ignored`) runs
 against an owned PG/SMTP fixture.
 
+`diagnostics <command>` gives the signed-in device P2 diagnostic access (protocol
+`6e82339`). Each command runs in a verified online session.
+- `diagnostics policy` prints this device's one effective collection policy:
+  `standard`, `debug` with its end, or `off`.
+- `diagnostics search '<DiagnosticSearchRequest JSON>'` runs one scoped search and
+  prints a page of fixed, redacted records. Scopes:
+  - `member`: your own records;
+  - `organization` with `organization_id`: you must be an active administrator;
+  - `global`: needs a current grant.
+- `diagnostics grant <private-key>` opens global scope for this session and device
+  for fifteen minutes. It fetches a one-time challenge, has `ssh-keygen -Y sign -n
+  nds-global-admin@nddev.ai -f <key>` sign exactly its bytes, and returns the
+  grant's expiry and key fingerprint. The private key stays with `ssh-keygen`; the
+  grant is not a token and never leaves the server.
+
+Refusals keep their class: `forbidden_scope`, `global_grant_required`,
+`diagnostics_unsupported_by_server`. Every result's `diagnostics` field also reports
+the delivery's `collection` mode and `debug_until`.
+
 The CLI reserves stdout for one JSON operation result; the shared bounded SDK
 writes redacted diagnostics to stderr. It uses the same accounts sender for
 signed events and actual native spans, reporting transport acknowledgements,
