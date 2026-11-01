@@ -12,6 +12,8 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use tracing::Instrument;
 use zeroize::Zeroizing;
 
+mod local_use;
+
 struct CommandReply {
     value: Value,
     durable: bool,
@@ -34,6 +36,8 @@ fn catalog_error(
         E::ModuleDisabled => "module_disabled",
         E::ModulePermissionRequired => "module_permission_required",
         E::ModuleConfigurationConflict => "module_configuration_conflict",
+        E::AccountIgnored => "account_ignored",
+        E::IgnoreListInvalid => "ignore_list_invalid",
     }
 }
 impl From<Value> for CommandReply {
@@ -308,7 +312,7 @@ async fn operation(
                     .map_err(catalog_error)?;
                 for group in page.groups {
                     for item in group.repositories {
-                        repositories.push(json!({"id":item.repository.id,"owner_id":group.owner_id,"owner":group.owner.as_ref().map(|value|value.owner.login.as_str()),"name":item.repository.name,"conflicted":item.observation.conflicted,"pending":item.observation.pending,"observed_at_ms":item.observation.observed_at_ms,"synchronization":item.synchronization.map(|value|json!({"outcome":value.outcome,"reason":value.reason,"observed_at_ms":value.observed_at_ms}))}));
+                        repositories.push(json!({"id":item.repository.id,"owner_id":group.owner_id,"owner":group.owner.as_ref().map(|value|value.owner.login.as_str()),"ignored":group.ignored,"name":item.repository.name,"conflicted":item.observation.conflicted,"pending":item.observation.pending,"observed_at_ms":item.observation.observed_at_ms,"synchronization":item.synchronization.map(|value|json!({"outcome":value.outcome,"reason":value.reason,"observed_at_ms":value.observed_at_ms}))}));
                     }
                 }
                 if !page.has_more {
@@ -515,6 +519,13 @@ async fn main() {
     let span = nddev_device_sync_telemetry::operation_span("agent", "process")
         .expect("static agent scope");
     let mut result = match arguments {
+        // One operation's lifetime belongs to its caller, not the point-use deadline.
+        Ok(arguments) if local_use::requested(&arguments) => {
+            local_use::run(&arguments, &mut export_identity, data_directory)
+                .instrument(span.clone())
+                .await
+                .map(CommandReply::from)
+        }
         Ok(arguments) => tokio::time::timeout(
             Duration::from_secs(120),
             operation(
@@ -590,7 +601,8 @@ async fn main() {
         logger.shutdown();
     }
     println!("{output}");
-    if !success {
-        std::process::exit(2);
-    }
+    // A local-use operation cancelled by a signal can leave tokio's blocking stdin
+    // read in flight; it cannot be cancelled and would hold runtime shutdown, so the
+    // process exits once its result and diagnostics are written.
+    std::process::exit(if success { 0 } else { 2 });
 }
