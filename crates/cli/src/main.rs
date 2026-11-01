@@ -600,7 +600,7 @@ async fn main() {
         .unwrap_or_else(|error| json!({"error":error}));
     output["diagnostics"] = observed.map_or_else(|| json!({"export":"unavailable"}), |state| json!({
         "export":match state.policy {nddev_device_sync_accounts::telemetry::ExportPolicy::Unknown=>"unknown",nddev_device_sync_accounts::telemetry::ExportPolicy::Enabled=>"enabled",nddev_device_sync_accounts::telemetry::ExportPolicy::Disabled=>"disabled"},
-        "collection":match state.collection {nddev_device_sync_accounts::telemetry::CollectionMode::Unknown=>"unknown",nddev_device_sync_accounts::telemetry::CollectionMode::Standard=>"standard",nddev_device_sync_accounts::telemetry::CollectionMode::Debug=>"debug",nddev_device_sync_accounts::telemetry::CollectionMode::Off=>"off"},
+        "collection":match state.collection {nddev_device_sync_accounts::telemetry::DeliveryCollection::Unknown=>"unknown",nddev_device_sync_accounts::telemetry::DeliveryCollection::Standard=>"standard",nddev_device_sync_accounts::telemetry::DeliveryCollection::Debug=>"debug",nddev_device_sync_accounts::telemetry::DeliveryCollection::Off=>"off"},
         "debug_until":(state.debug_expires_at>0).then_some(state.debug_expires_at),
         "acknowledged_events":state.delivered,"acknowledged_spans":state.spans_delivered,
         "undelivered":state.pending+state.spans_pending,"dropped":state.dropped+state.spans_dropped
