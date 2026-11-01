@@ -35,14 +35,14 @@ jobs:
       - name: Install native dependencies
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
       - name: Install pinned quality tools
-        uses: NDDev-Technocracy-Standarts/std-0004-ci-cd-workflows/.github/actions/tools@365415f32190ae22ff22462e791a4829ad6e91fc # nddev-cicd-v0.6.16
+        uses: NDDev-Technocracy-Standarts/std-0004-ci-cd-workflows/.github/actions/tools@c192c6adcf22088abf456635de614d42e8fa3f8d # nddev-cicd-v0.6.20
         with:
           # cargo-audit 0.22.2, cargo-deny 0.20.2 and cargo-nextest 0.9.149 from checksummed
           # releases instead of compiling them with cargo install in every job.
           capability: rust
       - name: Run the STD-0004 native Rust contract
         id: native
-        uses: NDDev-Technocracy-Standarts/std-0004-ci-cd-workflows/.github/actions/ci@a77e385fcf3c1b000c38167ecac7b74bb7715b10 # std-0004-v0.3.1
+        uses: NDDev-Technocracy-Standarts/std-0004-ci-cd-workflows/.github/actions/ci@c192c6adcf22088abf456635de614d42e8fa3f8d # nddev-cicd-v0.6.20
       - name: Require complete native results
         if: ${{ !cancelled() }}
         env:
