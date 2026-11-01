@@ -12,6 +12,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use tracing::Instrument;
 use zeroize::Zeroizing;
 
+mod auth;
 mod diagnostics;
 mod local_use;
 
@@ -522,6 +523,14 @@ async fn main() {
         .expect("static agent scope");
     let mut result = match arguments {
         // One operation's lifetime belongs to its caller, not the point-use deadline.
+        // Sign-in waits for a browser approval: its own 11-minute bound, not the 120 s one.
+        Ok(arguments) if auth::requested(&arguments) => tokio::time::timeout(
+            Duration::from_secs(700),
+            auth::run(&arguments, &mut export_identity).instrument(span.clone()),
+        )
+        .await
+        .unwrap_or(Err("operation_timeout"))
+        .map(CommandReply::from),
         Ok(arguments) if diagnostics::requested(&arguments) => tokio::time::timeout(
             Duration::from_secs(120),
             diagnostics::run(&arguments, &mut export_identity).instrument(span.clone()),

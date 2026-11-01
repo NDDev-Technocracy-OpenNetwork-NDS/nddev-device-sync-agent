@@ -87,6 +87,15 @@ device, principal and operation id, never configuration, paths or arguments.
 Native acceptance (`cargo test -p nds-agent --test local_use -- --ignored`) runs
 against an owned PG/SMTP fixture.
 
+`auth <command>` signs an agent host in without the GUI:
+- `auth status` prints the session state: authenticated, verified, principal and device ids, and expiry. It never prints credentials.
+- `auth github <pending-file>` starts the GitHub sign-in.
+  1. It writes the authorization URL and the 8-digit code (0600) to an absolute `<pending-file>`.
+  2. It waits up to 11 minutes for the browser approval on the server's confirmation page.
+  3. It enrolls or reuses this host's device.
+  The session lives in the OS credential store like the app's and lasts seven days.
+- `auth logout` ends it.
+
 `diagnostics <command>` gives the signed-in device P2 diagnostic access (protocol
 `6e82339`). Each command runs in a verified online session.
 - `diagnostics policy` prints this device's one effective collection policy:
