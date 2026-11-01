@@ -12,6 +12,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use tracing::Instrument;
 use zeroize::Zeroizing;
 
+mod diagnostics;
 mod local_use;
 
 struct CommandReply {
@@ -72,7 +73,7 @@ fn data_directory() -> Result<PathBuf, &'static str> {
     nddev_device_sync_accounts::private_data_directory().map_err(|_| "native_directory_unavailable")
 }
 
-fn executable(name: &str) -> Result<PathBuf, &'static str> {
+pub(crate) fn executable(name: &str) -> Result<PathBuf, &'static str> {
     let paths = std::env::var_os("PATH").ok_or("provider_unavailable")?;
     #[cfg(target_os = "windows")]
     let name = format!("{name}.exe");
@@ -521,6 +522,13 @@ async fn main() {
         .expect("static agent scope");
     let mut result = match arguments {
         // One operation's lifetime belongs to its caller, not the point-use deadline.
+        Ok(arguments) if diagnostics::requested(&arguments) => tokio::time::timeout(
+            Duration::from_secs(120),
+            diagnostics::run(&arguments, &mut export_identity).instrument(span.clone()),
+        )
+        .await
+        .unwrap_or(Err("operation_timeout"))
+        .map(CommandReply::from),
         Ok(arguments) if local_use::requested(&arguments) => {
             local_use::run(&arguments, &mut export_identity, data_directory)
                 .instrument(span.clone())
@@ -592,6 +600,8 @@ async fn main() {
         .unwrap_or_else(|error| json!({"error":error}));
     output["diagnostics"] = observed.map_or_else(|| json!({"export":"unavailable"}), |state| json!({
         "export":match state.policy {nddev_device_sync_accounts::telemetry::ExportPolicy::Unknown=>"unknown",nddev_device_sync_accounts::telemetry::ExportPolicy::Enabled=>"enabled",nddev_device_sync_accounts::telemetry::ExportPolicy::Disabled=>"disabled"},
+        "collection":match state.collection {nddev_device_sync_accounts::telemetry::CollectionMode::Unknown=>"unknown",nddev_device_sync_accounts::telemetry::CollectionMode::Standard=>"standard",nddev_device_sync_accounts::telemetry::CollectionMode::Debug=>"debug",nddev_device_sync_accounts::telemetry::CollectionMode::Off=>"off"},
+        "debug_until":(state.debug_expires_at>0).then_some(state.debug_expires_at),
         "acknowledged_events":state.delivered,"acknowledged_spans":state.spans_delivered,
         "undelivered":state.pending+state.spans_pending,"dropped":state.dropped+state.spans_dropped
     }));
