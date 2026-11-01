@@ -601,7 +601,8 @@ async fn main() {
         logger.shutdown();
     }
     println!("{output}");
-    if !success {
-        std::process::exit(2);
-    }
+    // A local-use operation cancelled by a signal can leave tokio's blocking stdin
+    // read in flight; it cannot be cancelled and would hold runtime shutdown, so the
+    // process exits once its result and diagnostics are written.
+    std::process::exit(if success { 0 } else { 2 });
 }

@@ -43,9 +43,16 @@ struct Basis {
 fn client_class(error: nddev_device_sync_accounts::view::ClientError) -> &'static str {
     use nddev_device_sync_accounts::view::ClientError as E;
     match error {
-        E::Transport | E::Timeout | E::Busy | E::CredentialStore => "identity_unavailable",
+        E::RevalidationRequired | E::Expired => "revalidation_required",
+        E::OnlineVerificationRequired => "online_verification_required",
+        E::DeviceRevoked => "device_revoked",
         E::Cancelled => "operation_cancelled",
-        _ => "revalidation_required",
+        E::Transport | E::Timeout | E::Busy | E::CredentialStore => "identity_unavailable",
+        E::InvalidEndpoint
+        | E::InvalidInput
+        | E::InvalidResponse
+        | E::TelemetryUnavailable
+        | E::Server(_) => "identity_rejected",
     }
 }
 
@@ -184,8 +191,22 @@ pub async fn run(
     if !view.authenticated || !(view.session_verified || view.offline_authorized) {
         return Err("sign_in_required");
     }
+    if view.session_verified {
+        // The same device preparation as every point-use command: this process
+        // loads the enrolled device authorization the fence is captured from.
+        identity
+            .prepare_device("NDS agent".into())
+            .await
+            .map_err(|_| "device_unavailable")?;
+    }
     *export_identity = Some(identity.clone());
     let fence = identity.local_use_fence().await.map_err(client_class)?;
+    // The original principal and device after preparation, as Shared records them;
+    // an operation without both identifiers is not attributable and does not start.
+    let view = identity.view();
+    if view.user_id.is_empty() || view.current_device_id.is_empty() {
+        return Err("identity_unavailable");
+    }
     let vault = Arc::new(
         VaultClient::new(identity.clone(), data_directory()?)
             .await

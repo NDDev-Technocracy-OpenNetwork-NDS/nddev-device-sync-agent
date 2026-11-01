@@ -168,12 +168,34 @@ async fn the_bridge_keeps_the_original_authority_until_it_changes() {
     // ready → valid under fullauto without any module checklist.
     let mut bridge = Bridge::start(&endpoint, &root);
     let ready = bridge.frame().await;
-    assert_eq!(ready["frame"], "ready");
+    assert_eq!(ready["frame"], "ready", "{ready}");
     assert_eq!(ready["user_id"], view.user_id.as_str());
     assert_eq!(ready["device_id"], view.current_device_id.as_str());
     assert_eq!(ready["policy_revision"], policy.revision().to_string());
     let operation = ready["operation_id"].as_str().unwrap().to_owned();
-    assert_eq!(bridge.validate().await["frame"], "valid");
+    let valid = bridge.validate().await;
+    assert_eq!(valid["frame"], "valid", "{valid}");
+
+    // A termination signal cancels an operation whose caller still holds stdin open;
+    // the child must not wait for the uncancellable blocking stdin read.
+    let mut signalled = Bridge::start(&endpoint, &root);
+    assert_eq!(signalled.frame().await["frame"], "ready");
+    let pid = signalled.child.id().unwrap().to_string();
+    assert!(
+        std::process::Command::new("kill")
+            .args(["-TERM", &pid])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let last = signalled.frame().await;
+    assert_eq!(last["ended"], "cancelled", "{last}");
+    let status = tokio::time::timeout(Duration::from_secs(10), signalled.child.wait())
+        .await
+        .expect("a signalled bridge must exit while its stdin stays open")
+        .unwrap();
+    assert!(status.success());
+    drop(signalled);
 
     // Narrowing this device to manual in another process disables the tool.
     identity
