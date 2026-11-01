@@ -12,6 +12,8 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use tracing::Instrument;
 use zeroize::Zeroizing;
 
+mod local_use;
+
 struct CommandReply {
     value: Value,
     durable: bool,
@@ -517,6 +519,13 @@ async fn main() {
     let span = nddev_device_sync_telemetry::operation_span("agent", "process")
         .expect("static agent scope");
     let mut result = match arguments {
+        // One operation's lifetime belongs to its caller, not the point-use deadline.
+        Ok(arguments) if local_use::requested(&arguments) => {
+            local_use::run(&arguments, &mut export_identity, data_directory)
+                .instrument(span.clone())
+                .await
+                .map(CommandReply::from)
+        }
         Ok(arguments) => tokio::time::timeout(
             Duration::from_secs(120),
             operation(
@@ -592,7 +601,8 @@ async fn main() {
         logger.shutdown();
     }
     println!("{output}");
-    if !success {
-        std::process::exit(2);
-    }
+    // A local-use operation cancelled by a signal can leave tokio's blocking stdin
+    // read in flight; it cannot be cancelled and would hold runtime shutdown, so the
+    // process exits once its result and diagnostics are written.
+    std::process::exit(if success { 0 } else { 2 });
 }
