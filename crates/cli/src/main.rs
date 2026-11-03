@@ -437,14 +437,41 @@ async fn stop_signal() -> std::io::Result<()> {
     tokio::signal::ctrl_c().await
 }
 
-/// Observes the existing owner; this is not another replication scheduler.
-async fn run_owner(owner: &Arc<NativeReplica>) -> Result<Value, &'static str> {
+type DiagnosticControl =
+    nddev_device_sync_telemetry::Control<nddev_device_sync_telemetry::LocalWriter>;
+
+fn apply_collection(
+    control: Option<&DiagnosticControl>,
+    view: &nddev_device_sync_accounts::view::DeliveryView,
+) {
+    use nddev_device_sync_accounts::view::DeliveryCollection;
+    let enabled = match view.collection {
+        DeliveryCollection::Off => Some(false),
+        DeliveryCollection::Standard | DeliveryCollection::Debug => Some(true),
+        DeliveryCollection::Unknown => None,
+    };
+    // Diagnostic degradation cannot change a functional command's outcome.
+    // Its actual local collection state is reported separately below.
+    if let Some(control) = control
+        && let Some(enabled) = enabled
+    {
+        let _ = control.set_collection_enabled(enabled);
+    }
+}
+
+/// Observe the current owner and its authenticated diagnostic policy.
+async fn run_owner(
+    owner: &Arc<NativeReplica>,
+    control: Option<&DiagnosticControl>,
+) -> Result<Value, &'static str> {
     let catalog = owner
         .catalog(nddev_device_sync_github::catalog_runtime::CatalogRuntime::new)
         .map_err(|_| "vault_unavailable")?;
     let mut updates = owner.updates().map_err(|_| "vault_unavailable")?;
     let stop = stop_signal();
     tokio::pin!(stop);
+    let mut policy_tick = tokio::time::interval(Duration::from_secs(1));
+    policy_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     tracing::info!(
         event.name = "agent.sync.started",
         module = "github",
@@ -459,6 +486,11 @@ async fn run_owner(owner: &Arc<NativeReplica>) -> Result<Value, &'static str> {
                     "observed_at_ms":value.observed_at_ms,
                     "error":value.error.map(|error|error.to_string()),
                 })));
+            }
+            _ = policy_tick.tick() => {
+                if let Some(delivery) = owner.delivery_handle() {
+                    apply_collection(control, &delivery.snapshot());
+                }
             }
             changed = updates.changed() => {
                 changed.map_err(|_| "vault_unavailable")?;
@@ -495,9 +527,9 @@ async fn main() {
     };
     let traces = ClientTraces::new(&config).ok();
     let mut logger = traces.as_ref().and_then(|traces| {
-        nddev_device_sync_telemetry::install_client_with_tracer_to(
+        nddev_device_sync_telemetry::install_client_with_traces_to(
             config,
-            traces.tracer(),
+            traces,
             nddev_device_sync_telemetry::LocalOutput::Stderr,
         )
         .ok()
@@ -508,10 +540,9 @@ async fn main() {
         .and_then(|(logger, traces)| {
             Some((logger.control.subscribe().ok()?, traces.subscribe().ok()?))
         });
-    if feeds.is_none() {
-        println!("{}", json!({"error":"telemetry_unavailable"}));
-        std::process::exit(2);
-    }
+    // A missing local diagnostic sink does not refuse an unrelated command.
+    // The SDK's privacy-safe startup hook remains in place; output reports the
+    // unavailable diagnostics independently of the functional result.
     let mut export_identity = None;
     let mut replica_owner = None;
     let arguments = std::env::args_os()
@@ -562,7 +593,7 @@ async fn main() {
         && reply.value.get("operation").and_then(Value::as_str) == Some("sync.run")
     {
         if let Some(owner) = &replica_owner {
-            match run_owner(owner).await {
+            match run_owner(owner, logger.as_ref().map(|logger| &logger.control)).await {
                 Ok(observation) => {
                     reply.value["stopped"] = json!(true);
                     reply.value["github"] = observation;
@@ -599,6 +630,9 @@ async fn main() {
         Some(delivery) => Some(delivery.flush().await),
         None => None,
     };
+    if let Some(view) = &observed {
+        apply_collection(logger.as_ref().map(|logger| &logger.control), view);
+    }
     drop(delivery);
     if NativeReplica::shutdown().await.is_err() {
         shutdown_error(&mut result);
@@ -614,6 +648,10 @@ async fn main() {
         "acknowledged_events":state.delivered,"acknowledged_spans":state.spans_delivered,
         "undelivered":state.pending+state.spans_pending,"dropped":state.dropped+state.spans_dropped
     }));
+    output["diagnostics"]["local_collection"] = logger
+        .as_ref()
+        .and_then(|logger| logger.control.diagnostics().collection_enabled)
+        .map_or(Value::Null, |enabled| json!(enabled));
     if let Some(traces) = traces {
         traces.shutdown();
     }
