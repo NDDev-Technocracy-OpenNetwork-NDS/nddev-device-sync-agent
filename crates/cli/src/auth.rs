@@ -164,7 +164,19 @@ pub async fn run(
         .await
         .map_err(|_| "identity_unavailable")?;
     match (command, argument) {
-        ("status", None) => Ok(json!({"operation":"auth.status","session":state(&view)})),
+        ("status", None) => {
+            // Session refresh restores identity, not this host's device match.
+            // Read the existing key/inventory; status never enrolls a new key.
+            let observed = if view.authenticated && view.session_verified {
+                identity
+                    .refresh_devices()
+                    .await
+                    .map_err(|_| "device_unavailable")?
+            } else {
+                view
+            };
+            Ok(json!({"operation":"auth.status","session":state(&observed)}))
+        }
         ("github", Some(file)) => {
             let result = github(&identity, file).await;
             if result.is_ok() {
