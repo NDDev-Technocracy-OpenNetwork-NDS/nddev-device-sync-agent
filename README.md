@@ -65,6 +65,56 @@ point-of-use CLI commands remain bounded and do not start catalog polling. GitHu
 provider failures are observed separately from Vault replication. No Git clone,
 commit creation or automatic Git mutation is activated by this command.
 
+`local-use <tool>` is the bridge through which a local system tool acts as this
+signed-in device (agent#161, ADR 0018). The tool spawns one child per operation:
+`nds-agent --server <origin> local-use disk-controller`. The child captures the
+device's local-use fence, which never leaves it, and checks the tool's admission:
+fullauto admits an installed tool, manual requires its explicit enablement in this
+device's module settings. It then writes one JSON frame per stdout line. `ready`
+carries only `operation_id`, `module`, `user_id`, `device_id`, `space_id` and
+`policy_revision`. Each `validate` line on stdin rechecks the original fence, the
+current device policy and the admission, and answers `valid` or `refused` with a
+fixed class (`revalidation_required`, `module_disabled`, `sign_in_required`, ...).
+`close` ends the operation; EOF, a broken pipe or a termination signal cancel it,
+and the last line is the operation result. The tool holds its own publication lock
+from a `valid` frame through its commit and publishes nothing after any other
+reply or EOF; a frame observes that moment and grants nothing beyond the process.
+The child needs an enrolled device session and an unlocked Vault on the host; it
+adds no daemon, listener or token. It emits the ADR 0018 records Shared emits:
+`module.admission.fullauto|manual` (`accepted`/`denied` with a fixed class) for each
+check and `module.action.completed|failed` when the operation's authority ends, with
+device, principal and operation id, never configuration, paths or arguments.
+Native acceptance (`cargo test -p nds-agent --test local_use -- --ignored`) runs
+against an owned PG/SMTP fixture.
+
+`auth <command>` signs an agent host in without the GUI:
+- `auth status` prints the session state: authenticated, verified, principal and device ids, and expiry. It never prints credentials.
+- `auth github <pending-file>` starts the GitHub sign-in.
+  1. It writes the authorization URL and the 8-digit code (0600) to an absolute `<pending-file>`.
+  2. It waits up to 11 minutes for the browser approval on the server's confirmation page.
+  3. It enrolls or reuses this host's device.
+  The session lives in the OS credential store like the app's and lasts seven days.
+- `auth logout` ends it.
+
+`diagnostics <command>` gives the signed-in device P2 diagnostic access (protocol
+`6e82339`). Each command runs in a verified online session.
+- `diagnostics policy` prints this device's one effective collection policy:
+  `standard`, `debug` with its end, or `off`.
+- `diagnostics search '<DiagnosticSearchRequest JSON>'` runs one scoped search and
+  prints a page of fixed, redacted records. Scopes:
+  - `member`: your own records;
+  - `organization` with `organization_id`: you must be an active administrator;
+  - `global`: needs a current grant.
+- `diagnostics grant <private-key>` opens global scope for this session and device
+  for fifteen minutes. It fetches a one-time challenge, has `ssh-keygen -Y sign -n
+  nds-global-admin@nddev.ai -f <key>` sign exactly its bytes, and returns the
+  grant's expiry and key fingerprint. The private key stays with `ssh-keygen`; the
+  grant is not a token and never leaves the server.
+
+Refusals keep their class: `forbidden_scope`, `global_grant_required`,
+`diagnostics_unsupported_by_server`. Every result's `diagnostics` field also reports
+the delivery's `collection` mode and `debug_until`.
+
 The CLI reserves stdout for one JSON operation result; the shared bounded SDK
 writes redacted diagnostics to stderr. It uses the same accounts sender for
 signed events and actual native spans, reporting transport acknowledgements,

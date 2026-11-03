@@ -12,6 +12,10 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use tracing::Instrument;
 use zeroize::Zeroizing;
 
+mod auth;
+mod diagnostics;
+mod local_use;
+
 struct CommandReply {
     value: Value,
     durable: bool,
@@ -34,6 +38,9 @@ fn catalog_error(
         E::ModuleDisabled => "module_disabled",
         E::ModulePermissionRequired => "module_permission_required",
         E::ModuleConfigurationConflict => "module_configuration_conflict",
+        E::AccountIgnored => "account_ignored",
+        E::RepositoryIgnored => "repository_ignored",
+        E::IgnoreListInvalid => "ignore_list_invalid",
     }
 }
 impl From<Value> for CommandReply {
@@ -67,7 +74,7 @@ fn data_directory() -> Result<PathBuf, &'static str> {
     nddev_device_sync_accounts::private_data_directory().map_err(|_| "native_directory_unavailable")
 }
 
-fn executable(name: &str) -> Result<PathBuf, &'static str> {
+pub(crate) fn executable(name: &str) -> Result<PathBuf, &'static str> {
     let paths = std::env::var_os("PATH").ok_or("provider_unavailable")?;
     #[cfg(target_os = "windows")]
     let name = format!("{name}.exe");
@@ -308,7 +315,7 @@ async fn operation(
                     .map_err(catalog_error)?;
                 for group in page.groups {
                     for item in group.repositories {
-                        repositories.push(json!({"id":item.repository.id,"owner_id":group.owner_id,"owner":group.owner.as_ref().map(|value|value.owner.login.as_str()),"name":item.repository.name,"conflicted":item.observation.conflicted,"pending":item.observation.pending,"observed_at_ms":item.observation.observed_at_ms,"synchronization":item.synchronization.map(|value|json!({"outcome":value.outcome,"reason":value.reason,"observed_at_ms":value.observed_at_ms}))}));
+                        repositories.push(json!({"id":item.repository.id,"owner_id":group.owner_id,"owner":group.owner.as_ref().map(|value|value.owner.login.as_str()),"ignored":group.ignored || item.ignored,"name":item.repository.name,"conflicted":item.observation.conflicted,"pending":item.observation.pending,"observed_at_ms":item.observation.observed_at_ms,"synchronization":item.synchronization.map(|value|json!({"outcome":value.outcome,"reason":value.reason,"observed_at_ms":value.observed_at_ms}))}));
                     }
                 }
                 if !page.has_more {
@@ -515,6 +522,28 @@ async fn main() {
     let span = nddev_device_sync_telemetry::operation_span("agent", "process")
         .expect("static agent scope");
     let mut result = match arguments {
+        // One operation's lifetime belongs to its caller, not the point-use deadline.
+        // Sign-in waits for a browser approval: its own 11-minute bound, not the 120 s one.
+        Ok(arguments) if auth::requested(&arguments) => tokio::time::timeout(
+            Duration::from_secs(700),
+            auth::run(&arguments, &mut export_identity).instrument(span.clone()),
+        )
+        .await
+        .unwrap_or(Err("operation_timeout"))
+        .map(CommandReply::from),
+        Ok(arguments) if diagnostics::requested(&arguments) => tokio::time::timeout(
+            Duration::from_secs(120),
+            diagnostics::run(&arguments, &mut export_identity).instrument(span.clone()),
+        )
+        .await
+        .unwrap_or(Err("operation_timeout"))
+        .map(CommandReply::from),
+        Ok(arguments) if local_use::requested(&arguments) => {
+            local_use::run(&arguments, &mut export_identity, data_directory)
+                .instrument(span.clone())
+                .await
+                .map(CommandReply::from)
+        }
         Ok(arguments) => tokio::time::timeout(
             Duration::from_secs(120),
             operation(
@@ -580,6 +609,8 @@ async fn main() {
         .unwrap_or_else(|error| json!({"error":error}));
     output["diagnostics"] = observed.map_or_else(|| json!({"export":"unavailable"}), |state| json!({
         "export":match state.policy {nddev_device_sync_accounts::telemetry::ExportPolicy::Unknown=>"unknown",nddev_device_sync_accounts::telemetry::ExportPolicy::Enabled=>"enabled",nddev_device_sync_accounts::telemetry::ExportPolicy::Disabled=>"disabled"},
+        "collection":match state.collection {nddev_device_sync_accounts::telemetry::DeliveryCollection::Unknown=>"unknown",nddev_device_sync_accounts::telemetry::DeliveryCollection::Standard=>"standard",nddev_device_sync_accounts::telemetry::DeliveryCollection::Debug=>"debug",nddev_device_sync_accounts::telemetry::DeliveryCollection::Off=>"off"},
+        "debug_until":(state.debug_expires_at>0).then_some(state.debug_expires_at),
         "acknowledged_events":state.delivered,"acknowledged_spans":state.spans_delivered,
         "undelivered":state.pending+state.spans_pending,"dropped":state.dropped+state.spans_dropped
     }));
@@ -590,7 +621,8 @@ async fn main() {
         logger.shutdown();
     }
     println!("{output}");
-    if !success {
-        std::process::exit(2);
-    }
+    // A local-use operation cancelled by a signal can leave tokio's blocking stdin
+    // read in flight; it cannot be cancelled and would hold runtime shutdown, so the
+    // process exits once its result and diagnostics are written.
+    std::process::exit(if success { 0 } else { 2 });
 }
