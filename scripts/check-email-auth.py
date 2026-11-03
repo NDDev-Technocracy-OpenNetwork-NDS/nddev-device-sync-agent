@@ -94,6 +94,12 @@ def worker():
                 raw=path.read_text()
                 assert code not in raw and fixture["owner_email"] not in raw
             code=None
+            emitted=[]
+            for line in (args.evidence/"email.log").read_text().splitlines():
+                try:event=json.loads(line)
+                except ValueError:continue
+                if isinstance(event,dict) and "event.name" in event:emitted.append(event)
+            assert emitted and all(event["source.commit"]==args.source for event in emitted)
             status,observed=command("restored",["status"],os.environ)
             assert status==0 and observed["session"]["authenticated"]
             assert observed["session"]["user_id"]==session["user_id"]
