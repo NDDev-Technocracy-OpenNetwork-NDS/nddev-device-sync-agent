@@ -1,3 +1,4 @@
+//! Email sign-in reads its secret code from one bounded stdin line, never an argument.
 //! `nds-agent --server <origin> auth <command>`: headless sign-in for an agent host.
 //!
 //! - `status` prints the session state of this host's NDS identity: whether it is
@@ -12,6 +13,8 @@
 use nddev_device_sync_accounts::{IdentityClient, View};
 use serde_json::{Value, json};
 use std::{io::Write, path::Path, sync::Arc, time::Duration};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt};
+use zeroize::Zeroizing;
 
 pub fn requested(arguments: &[String]) -> bool {
     matches!(arguments, [flag, _, scope, ..] if flag == "--server" && scope == "auth")
@@ -102,6 +105,47 @@ async fn github(identity: &IdentityClient, file: &str) -> Result<Value, &'static
     Ok(json!({"operation":"auth.github","session":state(&view)}))
 }
 
+fn code_line(bytes: &[u8]) -> Result<&str, &'static str> {
+    let bytes = bytes.strip_suffix(b"\n").unwrap_or(bytes);
+    let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
+    if bytes.len() != 8 || !bytes.iter().all(u8::is_ascii_digit) {
+        return Err("invalid_email_code");
+    }
+    std::str::from_utf8(bytes).map_err(|_| "invalid_email_code")
+}
+
+async fn email(identity: &IdentityClient, address: &str) -> Result<Value, &'static str> {
+    identity
+        .request_email(address.to_owned(), "en")
+        .await
+        .map_err(|_| "email_sign_in_unavailable")?;
+    tracing::event!(target: "nds_agent", tracing::Level::INFO,
+        { event.name = "agent.auth.email.waiting", auth_method = "email_otp", outcome = "pending" });
+    let receive = async {
+        // One eight-digit line, optional CR/LF. A large or unterminated input
+        // is bounded before allocation; never format the bytes or the address.
+        let mut bytes = Zeroizing::new(Vec::with_capacity(11));
+        let mut input = tokio::io::BufReader::with_capacity(11, tokio::io::stdin()).take(11);
+        input
+            .read_until(b'\n', &mut bytes)
+            .await
+            .map_err(|_| "email_code_unavailable")?;
+        Ok::<_, &'static str>(code_line(&bytes)?.to_owned())
+    };
+    let code = tokio::time::timeout(Duration::from_secs(600), receive)
+        .await
+        .map_err(|_| "email_sign_in_timeout")??;
+    identity
+        .verify_email(code)
+        .await
+        .map_err(|_| "email_sign_in_failed")?;
+    let view = identity
+        .prepare_device("NDS agent".into())
+        .await
+        .map_err(|_| "device_unavailable")?;
+    Ok(json!({"operation":"auth.email","session":state(&view)}))
+}
+
 pub async fn run(
     arguments: &[String],
     export_identity: &mut Option<Arc<IdentityClient>>,
@@ -120,9 +164,34 @@ pub async fn run(
         .await
         .map_err(|_| "identity_unavailable")?;
     match (command, argument) {
-        ("status", None) => Ok(json!({"operation":"auth.status","session":state(&view)})),
+        ("status", None) => {
+            // Session refresh restores identity, not this host's device match.
+            // Read the existing key/inventory; status never enrolls a new key.
+            let observed = if view.authenticated && view.session_verified {
+                identity
+                    .refresh_devices()
+                    .await
+                    .map_err(|_| "device_unavailable")?
+            } else {
+                view
+            };
+            if observed.authenticated
+                && observed.session_verified
+                && !observed.current_device_id.is_empty()
+            {
+                *export_identity = Some(identity.clone());
+            }
+            Ok(json!({"operation":"auth.status","session":state(&observed)}))
+        }
         ("github", Some(file)) => {
             let result = github(&identity, file).await;
+            if result.is_ok() {
+                *export_identity = Some(identity.clone());
+            }
+            result
+        }
+        ("email", Some(address)) => {
+            let result = email(&identity, address).await;
             if result.is_ok() {
                 *export_identity = Some(identity.clone());
             }
@@ -142,6 +211,24 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn email_code_input_is_one_bounded_secret_line() {
+        for value in [b"12345678".as_slice(), b"12345678\n", b"12345678\r\n"] {
+            assert_eq!(code_line(value).map(str::len), Ok(8));
+        }
+        for value in [
+            b"".as_slice(),
+            b"1234567",
+            b"123456789",
+            b"1234abcd",
+            b" 12345678",
+            b"12345678\n\n",
+            b"\xff1234567",
+        ] {
+            assert!(code_line(value).is_err());
+        }
+    }
 
     #[test]
     fn only_auth_commands_are_requested() {
