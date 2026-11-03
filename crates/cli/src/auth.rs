@@ -175,6 +175,12 @@ pub async fn run(
             } else {
                 view
             };
+            if observed.authenticated
+                && observed.session_verified
+                && !observed.current_device_id.is_empty()
+            {
+                *export_identity = Some(identity.clone());
+            }
             Ok(json!({"operation":"auth.status","session":state(&observed)}))
         }
         ("github", Some(file)) => {
