@@ -94,6 +94,7 @@ against an owned PG/SMTP fixture.
   2. It waits up to 11 minutes for the browser approval on the server's confirmation page.
   3. It enrolls or reuses this host's device.
   The session lives in the OS credential store like the app's and lasts seven days.
+- `auth email <address>` requests an email sign-in code, reads one eight-digit line from standard input, verifies it through Accounts and enrolls this host. Supply the code through a protected terminal or mailbox pipe; keep it out of arguments, logs and agent memory. The command emits one final JSON result and stores its session in the native credential service.
 - `auth logout` ends it.
 
 `diagnostics <command>` gives the signed-in device P2 diagnostic access (protocol
