@@ -119,7 +119,7 @@ async fn email(identity: &IdentityClient, address: &str) -> Result<Value, &'stat
         .request_email(address.to_owned(), "en")
         .await
         .map_err(|_| "email_sign_in_unavailable")?;
-    tracing::info!(target: "nds_agent",
+    tracing::event!(target: "nds_agent", tracing::Level::INFO,
         { event.name = "agent.auth.email.waiting", auth_method = "email_otp", outcome = "pending" });
     let receive = async {
         // One eight-digit line, optional CR/LF. A large or unterminated input
