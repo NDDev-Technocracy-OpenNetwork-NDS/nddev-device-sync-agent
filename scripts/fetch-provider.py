@@ -30,7 +30,7 @@ if "attestation_bundle" in spec:
 root = Path(sys.argv[2]).resolve()
 root.mkdir(mode=0o700, parents=True, exist_ok=False)
 repository, release, asset = (spec[key] for key in ("repository", "release", "linux_asset"))
-require(re.fullmatch(r"NDDev-OpenNetwork/[a-z0-9-]+", repository))
+require(re.fullmatch(r"(?:NDDev-OpenNetwork|NDDev-Technocracy-OpenNetwork)/[a-z0-9-]+", repository))
 require(re.fullmatch(r"[a-zA-Z0-9._-]+", release))
 require(re.fullmatch(r"[a-zA-Z0-9._-]+", asset))
 require(re.fullmatch(r"[a-f0-9]{64}", spec["sha256"]))

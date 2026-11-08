@@ -23,6 +23,10 @@ processes. Module repositories own isolated real-provider acceptance; the
 agent's Linux acceptance verifies composition against the pinned sysinfo
 provider. Dependencies use immutable Git revisions.
 
+Provider archives accept the historical and canonical NDDev OpenNetwork GitHub
+organizations. Exact locked size and SHA-256 are verified before extraction;
+archive executable paths remain confined to the isolated provider directory.
+
 This library has no standalone background daemon, remote-command endpoint,
 maintenance mutation, backup/recovery or private estate configuration.
 
