@@ -3291,7 +3291,7 @@ dependencies = [
 [[package]]
 name = "nddev-device-sync-remote"
 version = "0.0.1-alpha.2"
-source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-remote?rev=37e1ea149e624a6c952b25e3e66a6bf5319351d6#37e1ea149e624a6c952b25e3e66a6bf5319351d6"
+source = "git+https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-remote?rev=3baa58d43daf04fea068c39a5c8197698f0dc097#3baa58d43daf04fea068c39a5c8197698f0dc097"
 dependencies = [
  "nddev-device-sync-adapter-io",
  "serde",
