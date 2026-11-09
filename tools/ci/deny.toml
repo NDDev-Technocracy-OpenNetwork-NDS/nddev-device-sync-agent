@@ -1,0 +1,10 @@
+[advisories]
+yanked = "deny"
+
+[licenses]
+allow = ["Apache-2.0", "MIT", "Unicode-3.0"]
+confidence-threshold = 0.95
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
