@@ -28,7 +28,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Prepare the declared native SDK
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/hosted-sdk@d89f22a1b66410466de98dead910d47cf4450c6a
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/hosted-sdk@52d8302d2272967a21fd8e3ae594205588648777 # v0.6.28
         with:
           rust-version: '1.99.1'
           rust-components: rustfmt,clippy
@@ -41,21 +41,21 @@ jobs:
       - name: Install native prerequisites
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
       - name: Prepare exact native quality tools
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/release-assets@d89f22a1b66410466de98dead910d47cf4450c6a
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/release-assets@52d8302d2272967a21fd8e3ae594205588648777 # v0.6.28
         with:
           manifest: .github/native-tools.json
           directory: ${{ runner.temp }}/agent-native-tools
           add-to-path: true
       - name: Prepare locked source inputs
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@d89f22a1b66410466de98dead910d47cf4450c6a
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@52d8302d2272967a21fd8e3ae594205588648777 # v0.6.28
         with:
           recipe: setup
       - name: Check source without compilation
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@d89f22a1b66410466de98dead910d47cf4450c6a
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@52d8302d2272967a21fd8e3ae594205588648777 # v0.6.28
         with:
           recipe: check
       - name: Run the complete native and tooling tests
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@d89f22a1b66410466de98dead910d47cf4450c6a
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@52d8302d2272967a21fd8e3ae594205588648777 # v0.6.28
         with:
           recipe: test
       - name: Retain the actual native test report
