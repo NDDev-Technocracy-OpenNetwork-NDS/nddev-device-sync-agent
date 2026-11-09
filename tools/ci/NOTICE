@@ -1,0 +1,6 @@
+NDDev OpenNetwork Agent CI tooling
+Copyright 2026 NDDev OpenNetwork contributors.
+
+This independently scoped tooling is licensed under Apache-2.0.
+Its dependencies retain their original licenses. The surrounding runtime
+module retains its own license and published identities.

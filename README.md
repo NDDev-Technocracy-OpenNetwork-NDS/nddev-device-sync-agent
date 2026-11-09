@@ -17,9 +17,11 @@ enter telemetry. Module operations carry real OpenTelemetry contexts through
 the caller-installed shared telemetry SDK; its local logs do not imply remote
 export or delivery.
 
-`just check` formats and checks dependency licenses, sources and use without compiling.
-On an execution host or runner, `just test` runs Clippy, nextest and doctests; `cargo audit`
-checks current advisories. OS transport checks exercise real sockets and child
+`just setup` fetches the locked source inputs. `just check` formats and checks
+dependency licenses, sources and use without compiling. On an execution host or
+runner, `just test` runs Clippy, nextest and doctests; `just build` builds the
+release binaries and checks current advisories. `just verify` runs the full set.
+OS transport checks exercise real sockets and child
 processes. Module repositories own isolated real-provider acceptance; the
 agent's Linux acceptance verifies composition against the pinned sysinfo
 provider. Dependencies use immutable Git revisions.
@@ -27,6 +29,17 @@ provider. Dependencies use immutable Git revisions.
 Provider archives accept the historical and canonical NDDev OpenNetwork GitHub
 organizations. Exact locked size and SHA-256 are verified before extraction;
 archive executable paths remain confined to the isolated provider directory.
+The Rust tool in [tools/ci](tools/ci/README.md) prepares only the selected public
+provider through the official release API. It preserves optional attestation,
+publishes executable paths after successful preparation and removes its owned
+partial destination on failure. Local callers use `just provider-prepare`;
+historical immutable helper consumers retain their pinned source until they
+qualify a transition.
+
+CI composes the public SDK, release-asset and recipe actions with these same
+Just commands. Linux, macOS and Windows transport jobs remain, including the
+real assembled Linux provider acceptance. Job logs and nextest reports retain
+the verification results; the former private native-result bundle is retired.
 
 This library has no standalone background daemon, remote-command endpoint,
 maintenance mutation, backup/recovery or private estate configuration.
