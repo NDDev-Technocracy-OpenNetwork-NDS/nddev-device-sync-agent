@@ -1,5 +1,3 @@
-# One grouped pull request into dev for every GitHub Actions update; the 7-day cooldown keeps
-# brand-new releases out until they have settled (STD-0004 R-0003 update channel).
 version: 2
 updates:
   - package-ecosystem: github-actions
