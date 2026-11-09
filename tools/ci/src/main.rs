@@ -435,7 +435,14 @@ fn verify_archive(path: &Path, spec: &Spec, budget: &Budget) -> Result<()> {
         }
         hash.update(&buffer[..count]);
     }
-    if size != spec.size || format!("{:x}", hash.finalize()) != spec.sha256 {
+    let digest = hash.finalize();
+    let mut encoded = String::with_capacity(64);
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for &byte in digest.iter() {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 15)]));
+    }
+    if size != spec.size || encoded != spec.sha256 {
         return Err(Error::Digest);
     }
     Ok(())

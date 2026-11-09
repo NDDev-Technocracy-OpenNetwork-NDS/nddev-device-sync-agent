@@ -33,6 +33,8 @@ build:
 verify: check test build
 
 provider-prepare directory:
+    command -v curl
+    curl --version
     cargo metadata --locked --format-version 1 > {{ quote(directory + ".metadata.json") }}
     cargo run --locked --manifest-path tools/ci/Cargo.toml -- fetch-selected {{ quote(directory + ".metadata.json") }} sysinfo {{ quote(directory + "/sysinfo") }}
 
