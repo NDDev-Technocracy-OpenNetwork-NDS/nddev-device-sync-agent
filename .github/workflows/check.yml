@@ -5,8 +5,7 @@ on:
     branches: [main, dev]
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -18,40 +17,44 @@ env:
 
 jobs:
   quality:
+    permissions:
+      contents: read
     runs-on: ubuntu-26.04
     timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Install pinned Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
-      - name: Restore the Cargo dependency and tool cache
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Prepare the declared native SDK
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/hosted-sdk@d89f22a1b66410466de98dead910d47cf4450c6a
+        with:
+          rust-version: '1.99.1'
+          rust-components: rustfmt,clippy
+      - name: Restore the native dependency cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
           shared-key: native-contract
           add-job-id-key: "false"
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install native dependencies
+      - name: Install native prerequisites
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
-      - name: Prepare pinned source-check tools
-        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b
+      - name: Prepare exact native quality tools
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/release-assets@d89f22a1b66410466de98dead910d47cf4450c6a
         with:
-          tool: just@1.59.0,cargo-shear@1.14.0
-          fallback: none
-      - name: Install pinned quality tools
-        uses: NDDev-Technocracy-Standarts/std-0004-ci-cd-workflows/.github/actions/tools@c192c6adcf22088abf456635de614d42e8fa3f8d # nddev-cicd-v0.6.20
+          manifest: .github/native-tools.json
+          directory: ${{ runner.temp }}/agent-native-tools
+          add-to-path: true
+      - name: Prepare locked source inputs
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@d89f22a1b66410466de98dead910d47cf4450c6a
         with:
-          # cargo-audit 0.22.2, cargo-deny 0.20.2 and cargo-nextest 0.9.149 from checksummed
-          # releases instead of compiling them with cargo install in every job.
-          capability: rust
-      - name: Check source without compiling
-        run: just check
-      - name: Run the native Rust contract
-        id: native
-        uses: NDDev-Technocracy-Standarts/std-0004-ci-cd-workflows/.github/actions/ci@c192c6adcf22088abf456635de614d42e8fa3f8d # nddev-cicd-v0.6.20
-      - name: Require complete native results
-        if: ${{ !cancelled() }}
-        env:
-          STATUS: ${{ steps.native.outputs.status }}
-        run: test "$STATUS" = success
+          recipe: setup
+      - name: Check source without compilation
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@d89f22a1b66410466de98dead910d47cf4450c6a
+        with:
+          recipe: check
+      - name: Run the complete native and tooling tests
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@d89f22a1b66410466de98dead910d47cf4450c6a
+        with:
+          recipe: test

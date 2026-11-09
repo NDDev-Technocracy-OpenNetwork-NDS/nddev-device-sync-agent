@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "assets": [
+    {
+      "repository": "EmbarkStudios/cargo-deny",
+      "asset": 471598214,
+      "size": 4936832,
+      "sha256": "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f",
+      "file": "cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz",
+      "members": [
+        {
+          "path": "cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny",
+          "file": "cargo-deny",
+          "size": 8844624,
+          "sha256": "b329e25933d01c36dd7c47d84ea5716694f9b7caf53a5003d45674703a8ed54a",
+          "executable": true
+        }
+      ]
+    },
+    {
+      "repository": "nextest-rs/nextest",
+      "asset": 703602745,
+      "size": 9792418,
+      "sha256": "6b284d6fde9670dfb6ee10ea9d9abbc85f95643d3f592472d420d82e257b3a6c",
+      "file": "cargo-nextest-0.9.151-x86_64-unknown-linux-musl.tar.gz",
+      "members": [
+        {
+          "path": "cargo-nextest",
+          "file": "cargo-nextest",
+          "size": 27128632,
+          "sha256": "559f38665a6fbb6a18900d7172cf7e9c9155d96916452209b91cdd9d30c80f4d",
+          "executable": true
+        }
+      ]
+    },
+    {
+      "repository": "Boshen/cargo-shear",
+      "asset": 580851857,
+      "size": 1587250,
+      "sha256": "9004df4eb031a456026c4326ae0d0ce545321527a67be90f4524c1be729dc40e",
+      "file": "cargo-shear-x86_64-unknown-linux-musl.tar.gz",
+      "members": [
+        {
+          "path": "cargo-shear",
+          "file": "cargo-shear",
+          "size": 3664400,
+          "sha256": "66c6f91695d654846becf97df2c1083545003e28f79389e93b44e8cb0d15ac70",
+          "executable": true
+        }
+      ]
+    },
+    {
+      "repository": "rustsec/rustsec",
+      "asset": 439292222,
+      "size": 6648968,
+      "sha256": "7fb9497f8594b389e5fce5ef9b92db08432996895b2e0c5a0167a69ed445c428",
+      "file": "cargo-audit-x86_64-unknown-linux-musl-v0.22.2.tgz",
+      "members": [
+        {
+          "path": "cargo-audit-x86_64-unknown-linux-musl-v0.22.2/cargo-audit",
+          "file": "cargo-audit",
+          "size": 15401728,
+          "sha256": "66f9c8f530950d106c1869ce27ef5a4008bcea53c7716c3ed8117586337ee7d8",
+          "executable": true
+        }
+      ]
+    }
+  ]
+}
