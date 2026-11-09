@@ -3396,7 +3396,6 @@ dependencies = [
  "nddev-device-sync-vault",
  "reqwest",
  "serde_json",
- "tempfile",
  "tokio",
  "tracing",
  "uuid",
