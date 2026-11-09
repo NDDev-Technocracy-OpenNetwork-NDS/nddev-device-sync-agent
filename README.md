@@ -17,8 +17,9 @@ enter telemetry. Module operations carry real OpenTelemetry contexts through
 the caller-installed shared telemetry SDK; its local logs do not imply remote
 export or delivery.
 
-Run `just check`, `cargo nextest run --locked --workspace`, `cargo deny check`
-and `cargo audit`. OS transport checks exercise real sockets and child
+`just check` formats and checks dependency licenses, sources and use without compiling.
+On an execution host or runner, `just test` runs Clippy, nextest and doctests; `cargo audit`
+checks current advisories. OS transport checks exercise real sockets and child
 processes. Module repositories own isolated real-provider acceptance; the
 agent's Linux acceptance verifies composition against the pinned sysinfo
 provider. Dependencies use immutable Git revisions.
