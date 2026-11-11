@@ -28,7 +28,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Prepare the declared native SDK
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/hosted-sdk@d89f22a1b66410466de98dead910d47cf4450c6a
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/hosted-sdk@ca07bd07d12c91f103ce481372100cab6c83d72f # v0.6.34
         with:
           rust-version: '1.99.1'
           rust-components: rustfmt,clippy
@@ -41,17 +41,17 @@ jobs:
       - name: Install native prerequisites
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
       - name: Prepare exact native quality tools
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/release-assets@d89f22a1b66410466de98dead910d47cf4450c6a
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/release-assets@ca07bd07d12c91f103ce481372100cab6c83d72f # v0.6.34
         with:
           manifest: .github/native-tools.json
           directory: ${{ runner.temp }}/agent-native-tools
           add-to-path: true
       - name: Prepare locked source inputs
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@d89f22a1b66410466de98dead910d47cf4450c6a
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@ca07bd07d12c91f103ce481372100cab6c83d72f # v0.6.34
         with:
           recipe: setup
       - name: Verify the complete native contract and release libraries
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@d89f22a1b66410466de98dead910d47cf4450c6a
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@ca07bd07d12c91f103ce481372100cab6c83d72f # v0.6.34
         with:
           recipe: verify
       - name: Retain the actual native test report
@@ -77,7 +77,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Prepare the declared native SDK
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/hosted-sdk@d89f22a1b66410466de98dead910d47cf4450c6a
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/hosted-sdk@ca07bd07d12c91f103ce481372100cab6c83d72f # v0.6.34
         with:
           rust-version: '1.99.1'
           rust-components: rustfmt,clippy
@@ -88,7 +88,7 @@ jobs:
         run: cargo test --locked --workspace
       - name: Prepare the pinned real native provider
         if: runner.os == 'Linux'
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@d89f22a1b66410466de98dead910d47cf4450c6a
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@ca07bd07d12c91f103ce481372100cab6c83d72f # v0.6.34
         env:
           GH_TOKEN: ${{ github.token }}
         with:
@@ -96,6 +96,6 @@ jobs:
           arguments: '["${{ runner.temp }}/native-provider"]'
       - name: Real assembled agent acceptance
         if: runner.os == 'Linux'
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@d89f22a1b66410466de98dead910d47cf4450c6a
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@ca07bd07d12c91f103ce481372100cab6c83d72f # v0.6.34
         with:
           recipe: provider-check
