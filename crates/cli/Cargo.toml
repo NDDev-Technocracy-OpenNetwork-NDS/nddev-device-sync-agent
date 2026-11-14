@@ -8,7 +8,7 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-nddev-device-sync-github = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-github", rev = "c626fb716d920bcd8692a2c160900cf6a43e2a00", features = ["catalog-runtime", "commit-sync"] }
+nddev-device-sync-github = { version = "=0.0.1-alpha.7", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-github", rev = "b37737e7d6fbd98380c8aadbe86bf875998be7e1", features = ["catalog-runtime", "commit-sync"] }
 nddev-device-sync-domain = { version = "=0.0.12", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-core.git", rev = "ad614122d5916accbe1cca198768968b8c5bad0e" }
 nddev-device-sync-adapter-io = { version = "=0.0.1-alpha.4", path = "../io" }
 nddev-device-sync-accounts = { version = "=0.0.1-alpha.24", git = "https://github.com/NDDev-Technocracy-OpenNetwork-NDS/nddev-device-sync-accounts", rev = "1e65cfb2e03459f3ae4cab92f6a036dd53e2f77c" }
