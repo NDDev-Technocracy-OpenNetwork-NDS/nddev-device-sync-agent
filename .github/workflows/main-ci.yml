@@ -30,7 +30,7 @@ jobs:
       - name: Prepare the declared native SDK
         uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/hosted-sdk@e3698840cdcfc74e2808889b8a03bbcb20bd6d38 # v0.6.54
         with:
-          rust-version: '1.99.1'
+          rust-version: '1.100.0'
           rust-components: rustfmt,clippy
       - name: Restore the native dependency cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
@@ -79,7 +79,7 @@ jobs:
       - name: Prepare the declared native SDK
         uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/hosted-sdk@e3698840cdcfc74e2808889b8a03bbcb20bd6d38 # v0.6.54
         with:
-          rust-version: '1.99.1'
+          rust-version: '1.100.0'
           rust-components: rustfmt,clippy
           python-version: ${{ runner.os == 'Linux' && '3.15.2' || '' }}
       - if: runner.os == 'Linux'
