@@ -8,9 +8,9 @@ use std::{
 
 fn request(receipt: &Path, parent_waits: bool) -> ProcessRequest {
     let script = if parent_waits {
-        r#"sleep 30 >/dev/null 2>&1 & printf '%s' "$!" > "$1"; wait"#
+        r#"sleep 30 >/dev/null 2>&1 & printf '%s %s\n' "$$" "$!" > "$1"; wait"#
     } else {
-        r#"sleep 30 >/dev/null 2>&1 & printf '%s' "$!" > "$1"; exit 0"#
+        r#"sleep 30 >/dev/null 2>&1 & printf '%s %s\n' "$$" "$!" > "$1"; exit 0"#
     };
     ProcessRequest {
         executable: "/bin/sh".into(),
@@ -26,12 +26,20 @@ fn request(receipt: &Path, parent_waits: bool) -> ProcessRequest {
     }
 }
 
-async fn terminated(pid: &str) {
-    assert!(!pid.is_empty() && pid.bytes().all(|byte| byte.is_ascii_digit()));
+fn read_receipt(path: &Path) -> Option<(u32, u32)> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let (leader, helper) = text.strip_suffix('\n')?.split_once(' ')?;
+    let leader = leader.parse::<u32>().ok()?;
+    let helper = helper.parse::<u32>().ok()?;
+    (leader > 1 && helper > 1 && leader != helper).then_some((leader, helper))
+}
+
+async fn terminated(pid: u32) {
+    let pid_arg = pid.to_string();
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         let output = Command::new("ps")
-            .args(["-o", "stat=", "-p", pid])
+            .args(["-o", "stat=", "-p", &pid_arg])
             .output()
             .unwrap();
         let state = String::from_utf8(output.stdout).unwrap();
@@ -41,7 +49,7 @@ async fn terminated(pid: &str) {
         }
         assert!(
             Instant::now() < deadline,
-            "owned helper survived operation lifetime"
+            "owned process {pid} survived operation lifetime with state {state:?}"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -61,7 +69,8 @@ async fn successful_parent_exit_cannot_leave_a_closed_pipe_helper_running() {
         output.status.success(),
         "preserve the real parent exit status"
     );
-    terminated(&std::fs::read_to_string(receipt).unwrap()).await;
+    let (_, helper) = read_receipt(&receipt).expect("complete helper receipt");
+    terminated(helper).await;
 }
 
 #[tokio::test]
@@ -72,16 +81,31 @@ async fn dropping_the_caller_terminates_owned_parent_and_helper_scope() {
     let io = NativeIo::new(1).unwrap().process_handle();
     let task = tokio::spawn(async move { io.process(request, CancellationToken::new()).await });
     let deadline = Instant::now() + Duration::from_secs(1);
-    let pid = loop {
-        if let Ok(pid) = std::fs::read_to_string(&receipt)
-            && pid.parse::<u32>().is_ok_and(|value| value > 1)
-        {
-            break pid;
+    let (leader, helper) = loop {
+        if let Some(pids) = read_receipt(&receipt) {
+            break pids;
         }
-        assert!(Instant::now() < deadline);
+        assert!(
+            Instant::now() < deadline,
+            "process fixture did not publish its PIDs"
+        );
         tokio::time::sleep(Duration::from_millis(10)).await;
     };
+    let group = Command::new("ps")
+        .args(["-o", "pgid=", "-p", &helper.to_string()])
+        .output()
+        .unwrap();
+    assert!(group.status.success(), "helper must be alive before abort");
+    assert_eq!(
+        String::from_utf8(group.stdout)
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap(),
+        leader,
+        "helper must belong to the owned process group"
+    );
     task.abort();
     assert!(matches!(task.await, Err(error) if error.is_cancelled()));
-    terminated(&pid).await;
+    tokio::join!(terminated(leader), terminated(helper));
 }
