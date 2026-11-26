@@ -28,7 +28,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Prepare the declared native SDK
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/hosted-sdk@969b1ca89612dfb457792228c0120204c5498a41 # v0.6.165
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/hosted-sdk@c78def305daf3ad1defceeecf301167529ed1fb6 # v0.6.166
         with:
           rust-version: '1.100.0'
           rust-components: rustfmt,clippy
@@ -41,21 +41,21 @@ jobs:
       - name: Install native prerequisites
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
       - name: Prepare exact native quality tools
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/release-assets@969b1ca89612dfb457792228c0120204c5498a41 # v0.6.165
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/release-assets@c78def305daf3ad1defceeecf301167529ed1fb6 # v0.6.166
         with:
           manifest: .github/native-tools.json
           directory: ${{ runner.temp }}/agent-native-tools
           add-to-path: true
       - name: Prepare locked source inputs
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@969b1ca89612dfb457792228c0120204c5498a41 # v0.6.165
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@c78def305daf3ad1defceeecf301167529ed1fb6 # v0.6.166
         with:
           recipe: setup
       - name: Check source without compilation
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@969b1ca89612dfb457792228c0120204c5498a41 # v0.6.165
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@c78def305daf3ad1defceeecf301167529ed1fb6 # v0.6.166
         with:
           recipe: check
       - name: Run the complete native and tooling tests
-        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@969b1ca89612dfb457792228c0120204c5498a41 # v0.6.165
+        uses: NDDev-Technocracy-OpenNetwork/nddev-ci/actions/recipe@c78def305daf3ad1defceeecf301167529ed1fb6 # v0.6.166
         with:
           recipe: test
       - name: Retain the actual native test report
